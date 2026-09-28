@@ -17,6 +17,7 @@ Each plugin ships as source (`addons/sourcemod/scripting`) and compiled
 | `l4d_skypounce` | 0.4.0 | | Stops hunters chaining pounces off the sky brush ("ceiling pouncing"). Mode 1 is Zen's rule, mode 2 a last-surface-touched rule. |
 | `l4d_tank_burn_cap` | 1.0 | | Caps total fire damage on the tank so a molotov chips it instead of killing it. |
 | `l4d_vote_lock` | 1.0 | | Makes `!load`, `!match`, `!mode`, `!changemap`, `!cm` and `!setscores` admin only. An admin override does nothing on commands registered with `RegConsoleCmd`, so this uses a command listener instead. |
+| `l4d_hunter_phantom_fix` | 0.1 | | Stops a hunter killed mid-pounce from carrying on shredding (sound and claw blood at the pin spot) on clients after it dies. See below. |
 
 ## Fixed forks of existing plugins
 
@@ -50,6 +51,32 @@ handles the engine bug, and unstuck covers geometry the fix can't (props wedged
 against walls and the like).
 
 Thanks to Harry for the `nb_update_frequency` tip that led to the root cause.
+
+## The hunter phantom shred fix
+
+Sometimes a hunter killed while it shreds a pinned survivor keeps shredding on clients:
+the pounce hit sounds and claw blood carry on at the pin spot for up to 8 s after it dies,
+and survivors think their teammate is still capped.
+
+Both effects are client-side animation events in the hunter's `Melee_Pounce` sequence (a
+10 s clip). Players are animated client-side, and a client stops updating a dead player's
+animation state, so under packet loss or reordering the client can freeze the dead
+hunter in `Melee_Pounce` and play out the rest of the clip on its (invisible) player
+entity. The ragdoll is not involved.
+
+The plugin swaps the dead hunter's model for a moment and then puts it back. A model
+change makes every client rebuild the entity's animation, which drops the frozen
+sequence. The swap waits 0.2 s after death so clients have already built the ragdoll
+from the hunter model, and it only touches hunters that pounced within the last 11 s.
+
+How we measured it: a client on a server with 50 ms (+-10) lag and 2% loss, logging
+`snd_dumpclientsounds` (no cheats needed) and counting a phantom whenever the dead
+hunter's own entity started new `zombie_slice` sounds at its death spot 0.8 s or more
+after its death cry. Fix on vs off on alternating deaths: 0 phantoms in 195 mid-shred
+deaths with the swap, 12 in 187 without. A SourceTV demo (no loss) showed none.
+
+Cvars: `l4d_hunter_phantom_fix_enable` (1), `l4d_hunter_phantom_fix_delay` (0.2),
+`l4d_hunter_phantom_fix_hold` (1.0). `sm_phantomfix_stats` prints the swap count.
 
 ## Credits and license
 
