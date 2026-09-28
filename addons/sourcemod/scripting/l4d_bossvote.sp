@@ -1,0 +1,411 @@
+#include <sourcemod>
+#include <sdktools>
+#include <sdkhooks>
+#include <left4dhooks>
+#include <multicolors>
+
+Menu hVote = null;
+
+new Float:fTankFlow;
+new Float:fWitchFlow;
+new Handle:g_hVsBossBuffer;
+
+new String:tank[8];
+new String:witch[8];
+native SaveBossPercents();
+native IsInReady();
+new Votey = 0;
+new Voten = 0;
+#define VOTE_NO "no"
+#define VOTE_YES "yes"
+native SaveWitchPercent(Float:fWitchFlow); //from l4d_versus_same_UnprohibitBosses
+native float GetSurCurrentFloat(); // from l4d_current_survivor_progress
+
+public Plugin:myinfo =
+{
+	name = "L4D1 Boss Percents Vote",
+	author = "Visor, Harry Potter",
+	version = "1.5-survivorflow",
+	description = "Vote for percentage",
+	url = "http://steamcommunity.com/profiles/76561198026784913"
+};
+
+public OnPluginStart()
+{
+	LoadTranslations("Roto2-AZ_mod.phrases");
+	RegConsoleCmd("sm_voteboss", Vote);
+	g_hVsBossBuffer = FindConVar("versus_boss_buffer");
+	RegAdminCmd("sm_forceboss", CMD_ForceBoss, ADMFLAG_ROOT, "Adm forces to change boss percentage");
+}
+
+public OnMapStart()
+{
+	PrecacheSound("ui/menu_enter05.wav");
+	PrecacheSound("ui/beep_synthtone01.wav");
+	PrecacheSound("ui/beep_error01.wav");
+	
+	VoteMenuClose();
+}
+
+public Action Vote(int client, int args) 
+{
+	if (client == 0)
+	{
+		PrintToServer("[TS] This command cannot be used by server.");
+		return Plugin_Handled;
+	}
+
+	if (args < 1 || args > 2)
+	{
+		CPrintToChat(client, "%T","l4d_bossvote1",client,"!voteboss");
+		CPrintToChat(client, "%T","l4d_bossvote2",client,"!voteboss");
+		CPrintToChat(client, "%T","l4d_bossvote3",client);
+		return Plugin_Handled;
+	}
+
+	if(CanStartVotes(client))
+	{
+		if (args == 2)
+		{
+			GetCmdArg(1, tank, sizeof(tank));
+			fTankFlow = ParseBossFlow(tank);
+			GetCmdArg(2, witch, sizeof(witch));
+			fWitchFlow = ParseBossFlow(witch);
+		}
+		else
+		{
+			GetCmdArg(1, tank, sizeof(tank));
+			fTankFlow = ParseBossFlow(tank);
+			IntToString(0,witch,sizeof(witch));
+			fWitchFlow = 0.0;
+		}
+			
+		if(fTankFlow>=1 || fTankFlow<0 || fWitchFlow>=1 || fWitchFlow<0)
+		{
+			CPrintToChat(client, "%T","l4d_bossvote1",client,"!voteboss");
+			return Plugin_Handled;
+		}
+		
+		if (IsSpectator(client) || !IsInReady() || InSecondHalfOfRound())
+		{
+			CPrintToChat(client, "%T","l4d_bossvote4",client);
+			return Plugin_Handled;
+		}
+
+		new String:printmsg[128];
+		Format(printmsg, sizeof(printmsg), "%t","l4d_bossvote5", tank, witch);
+
+		StartVote(printmsg);
+		decl String:SteamId[35];
+		GetClientAuthId(client, AuthId_Steam2,SteamId, sizeof(SteamId));
+		CPrintToChatAll("[{olive}TS{default}] {olive}%N{default} %t: {blue}%t{default} ?", client,"starts a vote","l4d_bossvote5",tank,witch);
+		LogMessage("%N(%s) called a vote to change Tank: %s%, Witch: %s%",  client, SteamId, tank, witch);//記錄在log文件
+	}
+
+	return Plugin_Handled; 
+}
+
+public Action CMD_ForceBoss(int client, int args) 
+{
+	if (client == 0)
+	{
+		PrintToServer("[TS] This command cannot be used by server.");
+		return Plugin_Handled;
+	}
+
+	if (args < 1 || args > 2)
+	{
+		CPrintToChat(client, "%T","l4d_bossvote1",client,"!forceboss");
+		CPrintToChat(client, "%T","l4d_bossvote2",client,"!forceboss");
+		CPrintToChat(client, "%T","l4d_bossvote3",client);
+		return Plugin_Handled;
+	}
+
+	if(CanStartVotes(client))
+	{
+		if (args == 2)
+		{
+			GetCmdArg(1, tank, sizeof(tank));
+			fTankFlow = ParseBossFlow(tank);
+			GetCmdArg(2, witch, sizeof(witch));
+			fWitchFlow = ParseBossFlow(witch);
+		}
+		else
+		{
+			GetCmdArg(1, tank, sizeof(tank));
+			fTankFlow = ParseBossFlow(tank);
+			IntToString(0,witch,sizeof(witch));
+			fWitchFlow = 0.0;
+		}
+			
+		if(fTankFlow>=1 || fTankFlow<0 || fWitchFlow>=1 || fWitchFlow<0)
+		{
+			CPrintToChat(client, "%T","l4d_bossvote1",client,"!forceboss");
+			return Plugin_Handled;
+		}
+		
+		/*if (IsSpectator(client) || !IsInReady() || InSecondHalfOfRound())
+		{
+			CPrintToChat(client, "%T","l4d_bossvote4",client);
+			return Plugin_Handled;
+		}*/
+
+		char SteamId[35];
+		GetClientAuthId(client, AuthId_Steam2,SteamId, sizeof(SteamId));
+		CPrintToChatAll("[{olive}TS{default}] %t", "l4d_bossvote7", client, tank, witch);
+		LogMessage("Adm %N(%s) forces to change Tank: %s%, Witch: %s%", client, SteamId, tank, witch);//記錄在log文件
+	
+		CreateTimer(2.0, RewriteBossFlows);
+		CreateTimer(4.0, PrintMessage);
+	}
+
+	return Plugin_Handled;
+}
+
+bool CanStartVotes(int client)
+{
+ 	if(hVote != null || IsVoteInProgress())
+	{
+		CPrintToChat(client, "{default}[{olive}TS{default}] %T","A vote is already in progress!",client);
+		return false;
+	}
+
+	return true;
+}
+
+StartVote(const String:sVoteHeader[])
+{
+	hVote = new Menu(Handler_VoteCallback, MENU_ACTIONS_ALL);
+	hVote.SetTitle("%s ?",sVoteHeader);
+	hVote.AddItem(VOTE_YES, "Yes");
+	hVote.AddItem(VOTE_NO, "No");
+	hVote.ExitButton = false;
+
+	new iTotal = 0;
+	new iPlayers[MaxClients];
+	
+	for (new i = 1; i <= MaxClients; i++)
+	{
+		if (!IsClientInGame(i) || IsFakeClient(i) || GetClientTeam(i) == 1)
+		{
+			continue;
+		}
+		
+		iPlayers[iTotal++] = i;
+	}
+	
+	hVote.DisplayVote(iPlayers, iTotal, 20, 0);
+	
+	EmitSoundToAll("ui/beep_synthtone01.wav");
+}
+
+public Handler_VoteCallback(Menu menu, MenuAction action, int param1, int param2)
+{
+	//==========================
+	if(action == MenuAction_Select)
+	{
+		switch(param2)
+		{
+			case 0: 
+			{
+				Votey += 1;
+			}
+			case 1: 
+			{
+				Voten += 1;
+			}
+		}
+	}
+	else if ( action == MenuAction_Display)
+	{
+		char buffer[255];
+		Format(buffer, sizeof(buffer), "%T ?", "l4d_bossvote5",param1, tank, witch);
+		
+		Panel panel = view_as<Panel>(param2);
+		panel.SetTitle(buffer);
+	}
+	//==========================
+	decl String:item[64], String:display[64];
+	new Float:percent, Float:limit, votes, totalVotes;
+
+	GetMenuVoteInfo(param2, votes, totalVotes);
+	GetMenuItem(menu, param1, item, sizeof(item), _, display, sizeof(display));
+	
+	if (strcmp(item, VOTE_NO) == 0 && param1 == 1)
+	{
+		votes = totalVotes - votes;
+	}
+	percent = GetVotePercent(votes, totalVotes);
+
+	limit = 0.6;
+	
+	CheckVotes();
+	if (action == MenuAction_End)
+	{
+		VoteMenuClose();
+	}
+	else if (action == MenuAction_VoteCancel && param1 == VoteCancel_NoVotes)
+	{
+		CPrintToChatAll("{default}[{olive}TS{default}] %t","No votes");
+		EmitSoundToAll("ui/beep_error01.wav");
+		CreateTimer(2.0, VoteEndDelay);
+	}	
+	else if (action == MenuAction_VoteEnd)
+	{
+		if ((strcmp(item, VOTE_YES) == 0 && FloatCompare(percent,limit) < 0 && param1 == 0) || (strcmp(item, VOTE_NO) == 0 && param1 == 1))
+		{
+			EmitSoundToAll("ui/beep_error01.wav");
+			CPrintToChatAll("{default}[{olive}TS{default}] %t","Vote fail.", RoundToNearest(100.0*limit), RoundToNearest(100.0*percent), totalVotes);
+			CreateTimer(2.0, VoteEndDelay);
+		}
+		else if (!IsInReady() || InSecondHalfOfRound())
+		{
+			// The vote opens in ready-up but runs 20 s, so ready-up can end first.
+			// Applying it then moves the bosses mid-map: half 1's survivors keep
+			// the old spawn (often already out) and half 2 gets the voted one.
+			// Match 234, 2026-09-26: the tank spawned on leaving the saferoom in
+			// half 1, then the vote moved it to 60 for half 2. Discard instead.
+			EmitSoundToAll("ui/beep_error01.wav");
+			CPrintToChatAll("{default}[{olive}TS{default}] Boss vote passed after the round started, so it was discarded. Bosses are unchanged.");
+			LogMessage("boss vote Tank: %s%%, Witch: %s%% passed after ready-up ended; discarded", tank, witch);
+			CreateTimer(2.0, VoteEndDelay);
+		}
+		else
+		{
+			// Applied now rather than on a 2 s timer, so ready-up cannot end in
+			// between and reopen the same race.
+			RewriteBossFlows(null);
+			CreateTimer(4.0, PrintMessage);
+			EmitSoundToAll("ui/menu_enter05.wav");
+			CPrintToChatAll("{default}[{olive}TS{default}] %t","l4d_bossvote6");
+			CreateTimer(2.0, VoteEndDelay);
+		}
+	}
+	return 0;
+}
+
+// The engine spawns a boss when the survivors reach the stored flow percent MINUS
+// versus_boss_buffer converted to flow percent (see left4dhooks.inc on
+// L4D2Direct_SetVSTankFlowPercent). So a raw "!voteboss 40" actually put the tank
+// several percent EARLY. Adding the buffer back makes the number people vote mean
+// true survivor flow -- "40" now spawns the tank when survivors have covered 40%.
+//
+// Same correction l4d_current_survivor_progress already applies in GetBossProximity(),
+// which is what !cur reports and what RewriteBossFlows below compares against. Before
+// this, that comparison mixed buffered and unbuffered values.
+//
+// Ported from Icy-Inferno/Rotoblin-AZMod 74b86f65 "Changed boss vote to use survivor
+// flow". That commit predates CMD_ForceBoss and only patched 2 of the parse sites;
+// all 6 are covered here so !forceboss and the 1-argument form agree.
+stock Float:GetBossBufferFlow()
+{
+	if (g_hVsBossBuffer == INVALID_HANDLE) return 0.0;
+
+	new Float:fMaxFlow = L4D2Direct_GetMapMaxFlowDistance();
+	if (fMaxFlow <= 0.0) return 0.0;
+
+	return GetConVarFloat(g_hVsBossBuffer) / fMaxFlow;
+}
+
+stock Float:ParseBossFlow(const String:sArg[])
+{
+	new Float:fPercent = StringToFloat(sArg) / 100.0;
+
+	// 0 means "no boss this round" -- RewriteBossFlows guards on 0.0 < flow. Buffering
+	// it would turn "no witch" into "witch almost immediately", so leave it alone.
+	if (fPercent <= 0.0) return fPercent;
+
+	return fPercent + GetBossBufferFlow();
+}
+
+public Action:RewriteBossFlows(Handle:timer)
+{
+	if (!InSecondHalfOfRound())
+	{
+		float fSurvivorflow = GetSurCurrentFloat();
+
+		if ( 0.0 < fTankFlow && 0.01 < fSurvivorflow < 1 && fTankFlow < fSurvivorflow) fTankFlow = fSurvivorflow;
+		SetTankSpawn(fTankFlow);
+
+		if ( 0.0 < fWitchFlow && 0.01 < fSurvivorflow < 1 && fWitchFlow < fSurvivorflow) fWitchFlow = fSurvivorflow;
+		SetWitchSpawn(fWitchFlow);
+
+		SaveBossPercents();
+		SaveWitchPercent(fWitchFlow);
+	}
+}
+
+public Action:PrintMessage(Handle:timer)
+{
+	for (new i = 1; i <= MaxClients; i++)
+	{
+		if(IsClientInGame(i))
+			if(!IsFakeClient(i))
+				FakeClientCommand(i, "sm_boss");
+	}
+}
+
+SetTankSpawn(Float:flow)
+{
+	for (new i = 0; i <= 1; i++)
+	{
+		if (flow != 0)
+		{
+			L4D2Direct_SetVSTankToSpawnThisRound(i, true);
+			L4D2Direct_SetVSTankFlowPercent(i, flow);
+		}
+		else
+		{
+			L4D2Direct_SetVSTankToSpawnThisRound(i, false);
+			L4D2Direct_SetVSTankFlowPercent(i, 0.0);
+		}
+	}
+}
+
+SetWitchSpawn(Float:flow)
+{
+	for (new i = 0; i <= 1; i++)
+	{
+		if (flow != 0)
+		{
+			L4D2Direct_SetVSWitchToSpawnThisRound(i, true);
+			L4D2Direct_SetVSWitchFlowPercent(i, flow);
+		}
+		else
+		{
+			L4D2Direct_SetVSWitchToSpawnThisRound(i, false);
+			L4D2Direct_SetVSWitchFlowPercent(i, 0.0);
+		}
+	}
+}
+
+stock bool:IsSpectator(client)
+{
+	return client > 0 && client <= MaxClients && IsClientInGame(client) && GetClientTeam(client) == 1;
+}
+
+bool:InSecondHalfOfRound()
+{
+	return bool:GameRules_GetProp("m_bInSecondHalfOfRound");
+}
+
+CheckVotes()
+{
+	PrintHintTextToAll("%t: %i\n%t: %i","Agree", Votey,"Disagree", Voten);
+}
+public Action:VoteEndDelay(Handle:timer)
+{
+	Votey = 0;
+	Voten = 0;
+}
+VoteMenuClose()
+{
+	Votey = 0;
+	Voten = 0;
+	CloseHandle(hVote);
+	hVote = null;
+}
+Float:GetVotePercent(votes, totalVotes)
+{
+	return (float(votes) / float(totalVotes));
+}

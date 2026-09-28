@@ -1,0 +1,58 @@
+"Games"
+{
+	"left4dead"
+	{
+		"Signatures"
+		{
+			// the two "moved less than 1 unit, give up" checks live in here
+			"ZombieBotLocomotion::ResolveCollision"
+			{
+				"library"	"server"
+				"linux"		"@_ZN19ZombieBotLocomotion16ResolveCollisionERK6VectorS2_i"
+			}
+			// mov eax,[esp+4]; mov eax,[eax+OFFSET]; ret -- where the witch keeps her locomotion
+			"Witch::GetLocomotionInterface"
+			{
+				"library"	"server"
+				"linux"		"@_ZNK5Witch22GetLocomotionInterfaceEv"
+			}
+			"WitchLocomotion::vtable"
+			{
+				"library"	"server"
+				"linux"		"@_ZTV15WitchLocomotion"
+			}
+		}
+		"Addresses"
+		{
+			"ResolveCollision"
+			{
+				"linux"
+				{
+					"signature"	"ZombieBotLocomotion::ResolveCollision"
+				}
+			}
+			"GetLocomotionInterface"
+			{
+				"linux"
+				{
+					"signature"	"Witch::GetLocomotionInterface"
+				}
+			}
+			"WitchLocomotionVtable"
+			{
+				"linux"
+				{
+					"signature"	"WitchLocomotion::vtable"
+				}
+			}
+		}
+		"Offsets"
+		{
+			// ILocomotion::Update (ZombieBotLocomotion::Update) in the WitchLocomotion vtable, 0x94 / 4
+			"ILocomotion::Update"
+			{
+				"linux"	"37"
+			}
+		}
+	}
+}
