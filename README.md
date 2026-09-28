@@ -16,7 +16,6 @@ Each plugin ships as source (`addons/sourcemod/scripting`) and compiled
 | `l4d_saferoom_lock` | 1.2 | left4dhooks | Holds the end saferoom door open and unusable while a tank or witch is still alive. |
 | `l4d_skypounce` | 0.4.0 | | Stops hunters chaining pounces off the sky brush ("ceiling pouncing"). Mode 1 is Zen's rule, mode 2 a last-surface-touched rule. |
 | `l4d_tank_burn_cap` | 1.0 | | Caps total fire damage on the tank so a molotov chips it instead of killing it. |
-| `l4d_remove_pipebombs` | 1.0 | | Removes pipe bombs but keeps molotovs, which Rotoblin's throwable cvar can't do. |
 | `l4d_vote_lock` | 1.0 | | Makes `!load`, `!match`, `!mode`, `!changemap`, `!cm` and `!setscores` admin only. An admin override does nothing on commands registered with `RegConsoleCmd`, so this uses a command listener instead. |
 
 ## Fixed forks of existing plugins
