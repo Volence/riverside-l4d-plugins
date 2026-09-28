@@ -20,16 +20,16 @@ Each plugin ships as source (`addons/sourcemod/scripting`) and compiled
 
 ## Fixed forks of existing plugins
 
-Drop-in replacements for the Rotoblin-AZMod versions. They use the phrase files
-Rotoblin already ships (`Roto2-AZ_mod.phrases`, `l4d2_skill_detect.phrases`).
+Drop-in replacements for the Rotoblin-AZMod versions. They use the phrase file
+Rotoblin already ships (`Roto2-AZ_mod.phrases`).
 
 | Plugin | Version | Fix |
 |---|---|---|
 | `l4d_bossvote` | 1.5-survivorflow | A voted boss % means true survivor flow. The engine spawns at flow minus `versus_boss_buffer`, so `!voteboss 40` used to put the tank several % early. All 6 parse sites are patched (upstream's 2022 fix covered 2), and 0 still means "no boss". |
 | `l4d_boss_percent` | 1.6.3 | Shows the same true-flow numbers as the patched boss vote. |
 | `l4d_current_survivor_progress` | 2.3 | `!cur` uses the same true-flow numbers. |
-| `l4d2_skill_detect` | 2.3h-riverside1 | Skeet assists are counted even when `sm_skill_report_enable` is 0. Upstream only fired `OnTeamSkeetAssist` from inside the chat report block. |
-| `l4d_rock_lagcomp` | 1.13-riverside1 | Fires `OnTankRockSkeeted` for rock skeets. skill_detect can never see them because this plugin zeroes the damage first. |
+
+Our `l4d2_skill_detect` (skeet assists with reports off) and `l4d_rock_lagcomp` (`OnTankRockSkeeted` forward) fixes were merged upstream in 2026-09: use Harry's `l4d2_skill_detect` 2.4h ([L4D1_2-Plugins](https://github.com/fbef0102/L4D1_2-Plugins/tree/master/l4d2_skill_detect)) and `l4d_rock_lagcomp` 1.14 ([Rotoblin-AZMod](https://github.com/fbef0102/Rotoblin-AZMod)).
 
 ## The witch corner fix
 
