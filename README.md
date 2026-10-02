@@ -18,6 +18,9 @@ Each plugin ships as source (`addons/sourcemod/scripting`) and compiled
 | `l4d_tank_burn_cap` | 1.0 | | Caps total fire damage on the tank so a molotov chips it instead of killing it. |
 | `l4d_vote_lock` | 1.0 | | Makes `!load`, `!match`, `!mode`, `!changemap`, `!cm` and `!setscores` admin only. An admin override does nothing on commands registered with `RegConsoleCmd`, so this uses a command listener instead. |
 | `l4d_hunter_phantom_fix` | 0.1 | | Stops a hunter killed mid-pounce from carrying on shredding (sound and claw blood at the pin spot) on clients after it dies. See below. |
+| `l4d_tank_rules` | 1.2 | gamedata `l4d_tank_rules.txt` (Linux only) | While a tank is alive: survivor distance points are frozen, and primary weapon swaps can be locked, limited to one per tank, or made to cost a full reload. See below. |
+| `l4d_ledge_fix` | 1.0 | left4dhooks | Blocks ledge hangs over drops that could not hurt (a survivor hanging off a rock a few units above the floor). See below. |
+| `l4d_ping` | 3.7 | | Overwatch-style team pings: one bound key marks whatever you aim at (infected, item, weapon or spot) for your own team only. See below. |
 
 ## Fixed forks of existing plugins
 
@@ -77,6 +80,86 @@ deaths with the swap, 12 in 187 without. A SourceTV demo (no loss) showed none.
 
 Cvars: `l4d_hunter_phantom_fix_enable` (1), `l4d_hunter_phantom_fix_delay` (0.2),
 `l4d_hunter_phantom_fix_hold` (1.0). `sm_phantomfix_stats` prints the swap count.
+
+## Tank rules
+
+**No rush** (`l4d_tank_rules_rush`, default 1). Survivors can't earn distance points
+while a tank is alive, so a team can't run ahead to bank distance and then die. Their
+score after the tank dies is the frozen mark or wherever they are when it dies,
+whichever is further. Movement itself is never blocked.
+
+In server.so, `CTerrorGameRules::RecomputeTeamScores` calls
+`ForEachTerrorPlayer<CalcAndSetVersusMaxFlowDistance>`. For each survivor it compares
+their current flow with their stored furthest flow (a float at `CTerrorPlayer+0x2b74`)
+and raises the stored value if the current one is higher. The team's
+`m_iVersusDistance` is computed from the stored values. At offset 0xD0 in that
+function, `76 20` (`jbe`) is "not past it, keep the stored value". While a tank lives
+the plugin changes that byte to `EB` (`jmp`), so the stored flow never goes up. When
+the tank dies it writes `76` back. Clamping the float from SourcePawn instead doesn't
+work: the engine raises it and computes the team score in the same call, so a clamp is
+always one recompute late, and the late one can be the round-ending one.
+
+Details:
+- The byte is always restored on round start, map end, plugin unload, and when the
+  cvar is turned off.
+- From round_end to the next round_start the freeze is left alone. Incapped survivors
+  still count as alive to the engine, so one lying past the mark would be paid for it.
+- If the tank dies while nobody is standing (a wipe in progress), the freeze holds until
+  someone gets up or the next round starts.
+- On load the plugin checks the jump's operand and the store it skips. If the bytes
+  don't match (a different engine build), no-rush stays off and the weapon rules still
+  work.
+
+The gamedata is for the **Linux L4D1** server binary (symbol plus offset 208). A
+Windows server needs its own signature for the same `jbe` in server.dll.
+
+**Weapon swaps** (`l4d_tank_rules_weapons`, default 0). While a tank is alive:
+1 = nobody may pick up a different primary, 2 = only one survivor may, once per tank,
+3 = swaps are allowed but the new gun starts with an empty clip (rounds go to the
+reserve), so a swap costs a full reload. We run mode 3.
+
+`sm_tankrules_status` (admin) prints the patch state.
+
+## The ledge fix
+
+The game only lets a survivor grab a ledge when it predicts the fall would do at least
+1 damage. That estimate (`CTerrorPlayer::EstimateFallingDamage`) simulates the fall in
+0.1 s steps, at most 30, and only counts a step as landing on a plane with
+normal.z > 0.7. On a steep rock face or rough terrain it slides along the surface, can
+run out of steps while still "falling", and reports a painful fall for a drop of a few
+units. The survivor then hangs off a rock that is barely above the floor.
+
+The plugin re-checks every grab (`L4D_OnLedgeGrabbed`) with a plain hull trace down.
+If the landing speed, sqrt(vz^2 + 2 * g * drop), is at or below the game's `fall_speed_safe`, the
+fall is harmless and the grab is blocked, so the survivor just drops. A floor too steep
+to stand on is followed downhill to where the survivor would come to rest, so a slope
+into a real pit still counts as the full drop. A grab over a real drop passes.
+
+Cvars: `l4d_ledge_fix_enable` (0 off, 1 block, 2 log only), `l4d_ledge_fix_log`
+(1 writes every judged grab to `logs/ledge_fix.log`).
+
+## Ping
+
+Each player binds a key (`bind mouse3 sm_ping`, or type `!ping`). The server can't push
+binds, so the plugin tells each player once per connect how to bind it
+(`l4d_ping_hint`). The ping is classified automatically: special infected or witch
+(red), weapon, item, or location. Only your own team sees your pings and hears the
+cue. Each player has one ping at a time, and it lasts `l4d_ping_lifetime` (6 s).
+
+The marker is an `env_sprite` with an `$ignorez` material, one per teammate, each
+scaled to that viewer's distance so it stays about the same size on screen. L4D1 has no
+glow or instructor hint that works for this, so markers show through most walls but
+can be culled across some map areas.
+
+Main cvars: `l4d_ping_enable`, `l4d_ping_lifetime`, `l4d_ping_cooldown`,
+`l4d_ping_teams` (0 both teams, 1 survivors only), `l4d_ping_aim_assist` (cone in
+degrees), `l4d_ping_assist_infected` (0 = survivor aim-assist doesn't snap onto
+infected), `l4d_ping_follow` (0 = an enemy ping stays where the infected was),
+`l4d_ping_size`, `l4d_ping_sound`, `l4d_ping_chat`. The plugin writes the full list
+to `cfg/sourcemod/l4d_ping.cfg`.
+
+Other plugins can use `scripting/include/l4d_ping.inc`: `L4DPing_Create` drops a ping
+for a player, and `L4DPing_OnPing` fires after every ping.
 
 ## Credits and license
 

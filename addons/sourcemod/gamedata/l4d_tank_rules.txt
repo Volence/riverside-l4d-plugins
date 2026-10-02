@@ -1,0 +1,36 @@
+"Games"
+{
+	"left4dead"
+	{
+		"Addresses"
+		{
+			"CalcAndSetVersusMaxFlowDistance"
+			{
+				"linux"
+				{
+					"signature"	"ForEachTerrorPlayer<CalcAndSetVersusMaxFlowDistance>"
+				}
+			}
+		}
+		"Offsets"
+		{
+			// server.so md5 9ad66748..., function at 0x2d1a90:
+			//   2d1b59  fucomi %st(1),%st         current flow vs stored furthest flow
+			//   2d1b60  76 20  jbe 2d1b82          not past it: keep the stored value
+			//   2d1b62  ...    store max(0, current) at CTerrorPlayer+0x2b74
+			// jbe -> jmp (EB 20) always keeps the stored value.
+			"keep_stored_jbe"
+			{
+				"linux"		"208"
+			}
+		}
+		"Signatures"
+		{
+			"ForEachTerrorPlayer<CalcAndSetVersusMaxFlowDistance>"
+			{
+				"library"	"server"
+				"linux"		"@_Z19ForEachTerrorPlayerI31CalcAndSetVersusMaxFlowDistanceEbRT_"
+			}
+		}
+	}
+}
