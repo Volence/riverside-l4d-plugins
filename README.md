@@ -25,15 +25,50 @@ Each plugin ships as source (`addons/sourcemod/scripting`) and compiled
 ## Fixed forks of existing plugins
 
 Drop-in replacements for the Rotoblin-AZMod versions. They use the phrase file
-Rotoblin already ships (`Roto2-AZ_mod.phrases`).
+Rotoblin already ships (`Roto2-AZ_mod.phrases`), and build against the Rotoblin-AZMod
+`scripting-az/include` folder (`l4d_lib`, `multicolors`, `collisionhook`).
 
 | Plugin | Version | Fix |
 |---|---|---|
 | `l4d_bossvote` | 1.5-survivorflow | A voted boss % means true survivor flow. The engine spawns at flow minus `versus_boss_buffer`, so `!voteboss 40` used to put the tank several % early. All 6 parse sites are patched (upstream's 2022 fix covered 2), and 0 still means "no boss". |
 | `l4d_boss_percent` | 1.6.3 | Shows the same true-flow numbers as the patched boss vote. |
 | `l4d_current_survivor_progress` | 2.3 | `!cur` uses the same true-flow numbers. |
+| `l4d_collision_adjustments` | 1.2h-riverside2 | A hunter aimed at a downed survivor now lands on him. Needs the CollisionHook extension. See below. |
+| `l4d_tankpunchstuckfix` | 0.6-riverside2 | A survivor a tank punch leaves inside the ceiling or a wall is put back where he really was. Needs left4dhooks. See below. |
 
 Our `l4d2_skill_detect` (skeet assists with reports off) and `l4d_rock_lagcomp` (`OnTankRockSkeeted` forward) fixes were merged upstream in 2026-09: use Harry's `l4d2_skill_detect` 2.4h ([L4D1_2-Plugins](https://github.com/fbef0102/L4D1_2-Plugins/tree/master/l4d2_skill_detect)) and `l4d_rock_lagcomp` 1.14 ([Rotoblin-AZMod](https://github.com/fbef0102/Rotoblin-AZMod)).
+
+## The hunter pounce on a downed survivor
+
+`l4d_collision_adjustments_hunter_incap 1` turns off hunter collision with downed
+survivors for the first 0.09 s of every pounce, so a hunter pouncing someone else isn't
+grabbed by a downed survivor on the way. From about 40 units that window covers the whole
+flight, so a hunter standing next to a downed survivor could never pounce him.
+
+The fork adds `l4d_collision_adjustments_hunter_incap_aim` (default 60). When the pounce
+starts, the survivor closest to the hunter's crosshair (within that many degrees) keeps
+his collision if he is downed, so an aimed pounce lands. Downed survivors he isn't aimed
+at are still passed through. 0 brings back the old behaviour.
+
+## The tank punch ceiling stuck
+
+A tank punch is checked against where the survivor was a moment ago on the tank
+player's screen (lag compensation). In L4D1, a jumping survivor uses the crouched hull
+in the air. If the punch rewinds a survivor who has just landed to a point mid-jump, the
+punch lifts him 18 units there (crouched, so it fits). The engine then gives him back his
+standing hull and tries to move him to his real spot plus that lift. Under a low ceiling
+both of its restore traces start inside the world, so it gives up and leaves him standing
+inside the ceiling. Seen on Dead Air 4 (the counter under the low ceiling near the
+terminal windows), and reproduced on a test server: 4 stuck in 29 punches before the fix,
+0 in 38 after.
+
+Upstream's version of this plugin has its unstick code commented out and only toggles
+`sv_lagcompensationforcerestore`, which doesn't cover this case. The fork records every
+survivor's real position before each swing, and after the swing (once lag compensation
+has restored everyone) hull-checks each survivor it hit. Anyone inside the world goes back
+to his real position with his knockback kept, and is re-checked for 1 s, with
+`L4D_WarpToValidPositionIfStuck` as the last resort. `sm_punchstuckfix_solid 0` turns it
+off. Every rescue is logged to `logs/tank_punch_stuck.log`.
 
 ## The witch corner fix
 
