@@ -10,7 +10,7 @@ public Plugin:myinfo =
 {
 	name = "L4D1 Boss Flow Announce (Back to roots edition)",
 	author = "ProdigySim, Jahze, Stabby, CircleSquared, CanadaRox, Visor, L4D1 port by harry",
-	version = "1.6.3",
+	version = "1.6.3-riverside1",
 	description = "Announce boss flow percents!",
 	url = "https://github.com/ConfoglTeam/ProMod"
 };
@@ -33,6 +33,7 @@ public APLRes:AskPluginLoad2(Handle:myself, bool:late, String:error[], err_max)
 	CreateNative("GetWitchPercentFloat",Native_GetWitchPercentFloat);
 	CreateNative("PrintBossPercents",Native_PrintBossPercents);
 	CreateNative("SaveBossPercents",Native_SaveBossPercents);
+	MarkNativeAsOptional("Is_Ready_Plugin_On"); // riverside: l4dready may be reloading or absent
 
 	g_forwardUpdateBosses = CreateGlobalForward("OnUpdateBosses", ET_Ignore, Param_Cell, Param_Cell);
 	RegPluginLibrary("l4d_boss_percent");
@@ -69,7 +70,7 @@ public OnPluginStart()
 }
 public LeftStartAreaEvent(Handle:event, String:name[], bool:dontBroadcast)
 {
-	if(!Is_Ready_Plugin_On())
+	if(!(GetFeatureStatus(FeatureType_Native, "Is_Ready_Plugin_On") == FeatureStatus_Available && Is_Ready_Plugin_On()))
 		for (new client = 1; client <= MaxClients; client++)
 			if (IsClientConnected(client) && IsClientInGame(client)&& !IsFakeClient(client))
 				PrintBossPercents(client);
@@ -168,6 +169,17 @@ stock PrintBossPercents(client)
 
 public Action:BossCmd(client, args)
 {
+	// riverside: server console / rcon has no team or chat
+	if (!client)
+	{
+		decl String:sWitch[16];
+		if (iWitchPercent > 0) Format(sWitch, sizeof(sWitch), "%d%%", iWitchPercent);
+		else strcopy(sWitch, sizeof(sWitch), (iWitchPercent == -2) ? "Witch Party" : "None");
+		if (iTankPercent) ReplyToCommand(client, "[TS] Tank: %d%%, Witch: %s", iTankPercent, sWitch);
+		else ReplyToCommand(client, "[TS] Tank: None, Witch: %s", sWitch);
+		return Plugin_Handled;
+	}
+
 	new iTeam = GetClientTeam(client);
 
 	if (GetConVarBool(hCvarPrintToEveryone))//打這指令的只有自己看到

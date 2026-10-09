@@ -25,7 +25,7 @@ public Plugin:myinfo =
 {
 	name = "L4D1 Boss Percents Vote",
 	author = "Visor, Harry Potter",
-	version = "1.5-survivorflow",
+	version = "1.5-survivorflow-riverside1",
 	description = "Vote for percentage",
 	url = "http://steamcommunity.com/profiles/76561198026784913"
 };
@@ -149,6 +149,13 @@ public Action CMD_ForceBoss(int client, int args)
 			CPrintToChat(client, "%T","l4d_bossvote4",client);
 			return Plugin_Handled;
 		}*/
+
+		// riverside: RewriteBossFlows does nothing in the second half, so do not announce a change that will not happen
+		if (InSecondHalfOfRound())
+		{
+			ReplyToCommand(client, "[TS] Bosses can only be forced in the first half.");
+			return Plugin_Handled;
+		}
 
 		char SteamId[35];
 		GetClientAuthId(client, AuthId_Steam2,SteamId, sizeof(SteamId));

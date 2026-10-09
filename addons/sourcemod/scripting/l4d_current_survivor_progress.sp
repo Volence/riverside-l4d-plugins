@@ -15,7 +15,7 @@ public Plugin:myinfo =
     name = "L4D1 Survivor Progress",
     author = "CanadaRox, Visor, L4D1 port by harry",
     description = "Print survivor progress in flow percents ",
-    version = "2.3",
+    version = "2.3-riverside2",
     url = "https://github.com/Attano/ProMod"
 };
 
@@ -23,6 +23,7 @@ public APLRes:AskPluginLoad2(Handle:myself, bool:late, String:error[], err_max)
 {
 	CreateNative("GetSurCurrent",Native_SurCurrent);
 	CreateNative("GetSurCurrentFloat",Native_SurCurrentFloat);
+	MarkNativeAsOptional("Is_Ready_Plugin_On"); // riverside2: l4dready may be reloading or absent
 	return APLRes_Success;
 }
 
@@ -57,7 +58,7 @@ public Action:SaveSurCurrent(Handle:timer)
 
 public LeftStartAreaEvent(Handle:event, String:name[], bool:dontBroadcast)
 {
-	if(!Is_Ready_Plugin_On())
+	if(!(GetFeatureStatus(FeatureType_Native, "Is_Ready_Plugin_On") == FeatureStatus_Available && Is_Ready_Plugin_On()))
 		CPrintToChatAll("{default}[{olive}TS{default}] %t","l4d_current_survivor_progress", SurCurrent);
 }
 
@@ -65,6 +66,11 @@ public Action:CurrentCmd(client, args)
 {
 	SurCurrent = RoundToNearest(GetMaxSurvivorCompletion() * 100.0);
 	SurCurrent = SurCurrent>=100 ? 100 : SurCurrent;
+	if (!client) // riverside: server console / rcon
+	{
+		ReplyToCommand(client, "[TS] Current: %d%%", SurCurrent);
+		return Plugin_Handled;
+	}
 	CPrintToChat(client, "{default}[{olive}TS{default}] %T","l4d_current_survivor_progress",client, SurCurrent);
 	
 }
