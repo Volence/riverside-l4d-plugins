@@ -12,7 +12,7 @@ Each plugin ships as source (`addons/sourcemod/scripting`) and compiled
 | Plugin | Version | Needs | What it does |
 |---|---|---|---|
 | `l4d_witch_corner_fix` | 1.0.0 | DHooks, gamedata `l4d_witch_corner_fix.txt` | Stops a startled witch freezing on corners when `nb_update_frequency` is low (we run 0.014). See below. |
-| `l4d_witch_unstuck` | 2.4.0 | left4dhooks | Fallback for a witch that makes no progress toward her target for 3 s: nudges her 8/16/24 units off the snag, then allows a short hop to a nearby nav spot (at most 120 units sideways, never when she is already within 120 units of her target). `!stuckwitch` logs a snapshot for admins. |
+| `l4d_witch_unstuck` | 2.4.1 | left4dhooks | Fallback for a witch that makes no progress toward her target for 3 s: nudges her 8/16/24 units off the snag, then allows a short hop to a nearby nav spot (at most 120 units sideways, never when she is already within 120 units of her target). `!stuckwitch` logs a snapshot for admins. |
 | `l4d_saferoom_lock` | 1.2 | left4dhooks | Holds the end saferoom door open and unusable while a tank or witch is still alive. |
 | `l4d_skypounce` | 0.4.0 | | Stops hunters chaining pounces off the sky brush ("ceiling pouncing"). Mode 1 is Zen's rule, mode 2 a last-surface-touched rule. |
 | `l4d_tank_burn_cap` | 1.0 | | Caps total fire damage on the tank so a molotov chips it instead of killing it. |
