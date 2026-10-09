@@ -30,9 +30,9 @@ Rotoblin already ships (`Roto2-AZ_mod.phrases`), and build against the Rotoblin-
 
 | Plugin | Version | Fix |
 |---|---|---|
-| `l4d_bossvote` | 1.5-survivorflow | A voted boss % means true survivor flow. The engine spawns at flow minus `versus_boss_buffer`, so `!voteboss 40` used to put the tank several % early. All 6 parse sites are patched (upstream's 2022 fix covered 2), and 0 still means "no boss". |
-| `l4d_boss_percent` | 1.6.3 | Shows the same true-flow numbers as the patched boss vote. |
-| `l4d_current_survivor_progress` | 2.3 | `!cur` uses the same true-flow numbers. |
+| `l4d_bossvote` | 1.5-survivorflow-riverside1 | A voted boss % means true survivor flow. The engine spawns at flow minus `versus_boss_buffer`, so `!voteboss 40` used to put the tank several % early. All 6 parse sites are patched (upstream's 2022 fix covered 2), and 0 still means "no boss". |
+| `l4d_boss_percent` | 1.6.3-riverside1 | Shows the same true-flow numbers as the patched boss vote. |
+| `l4d_current_survivor_progress` | 2.3-riverside2 | `!cur` uses the same true-flow numbers. |
 | `l4d_collision_adjustments` | 1.2h-riverside2 | A hunter aimed at a downed survivor now lands on him. Needs the CollisionHook extension. See below. |
 | `l4d_tankpunchstuckfix` | 0.6-riverside2 | A survivor a tank punch leaves inside the ceiling or a wall is put back where he really was. Needs left4dhooks. See below. |
 
