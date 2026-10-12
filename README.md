@@ -35,6 +35,7 @@ Rotoblin already ships (`Roto2-AZ_mod.phrases`), and build against the Rotoblin-
 | `l4d_current_survivor_progress` | 2.3-riverside2 | `!cur` uses the same true-flow numbers. |
 | `l4d_collision_adjustments` | 1.2h-riverside2 | A hunter aimed at a downed survivor now lands on him. Needs the CollisionHook extension. See below. |
 | `l4d_tankpunchstuckfix` | 0.6-riverside2 | A survivor a tank punch leaves inside the ceiling or a wall is put back where he really was. Needs left4dhooks. See below. |
+| `l4d_lagcomp_skeet` | 1.4-riverside2 | Actually runs on L4D1 (the attacker offset was the L4D2 one), and no longer crashes the server when a skeet ends a pounce. Needs DHooks. See below. |
 
 Our `l4d2_skill_detect` (skeet assists with reports off) and `l4d_rock_lagcomp` (`OnTankRockSkeeted` forward) fixes were merged upstream in 2026-09: use Harry's `l4d2_skill_detect` 2.4h ([L4D1_2-Plugins](https://github.com/fbef0102/L4D1_2-Plugins/tree/master/l4d2_skill_detect)) and `l4d_rock_lagcomp` 1.14 ([Rotoblin-AZMod](https://github.com/fbef0102/Rotoblin-AZMod)).
 
@@ -69,6 +70,27 @@ has restored everyone) hull-checks each survivor it hit. Anyone inside the world
 to his real position with his knockback kept, and is re-checked for 1 s, with
 `L4D_WarpToValidPositionIfStuck` as the last resort. `sm_punchstuckfix_solid 0` turns it
 off. Every rescue is logged to `logs/tank_punch_stuck.log`.
+
+## Lag-compensated skeet on L4D1
+
+Forgetest's `l4d_lagcomp_skeet` judges "was this hunter mid-pounce?" at the time the
+shooter saw, so skeets count the same at any ping. Two problems on L4D1:
+
+1. **It never ran.** The plugin hardcoded the damage info's attacker at offset 52, the
+   L4D2 layout. On L4D1 offset 52 is `m_flBaseDamage` and the attacker is at 40, so the
+   attacker check failed on every hit and the plugin did nothing. The offset now comes
+   from gamedata (`CTakeDamageInfo::m_hAttacker`: 40 on L4D1, 52 on L4D2).
+2. **With the offset fixed, it can crash srcds.** When the pounce interrupt damage runs
+   out, the engine calls `OnPounceEnded()` (clears `m_isAttemptingToPounce`) and then
+   damages the hunter again from inside the same `OnTakeDamageInternal`. The plugin's
+   pre-hook ran on that nested call and set the flag back, so the engine went back into
+   the pounce branch forever: about 7700 nested calls and a stack overflow (our match
+   628, 2026-10-10). Fixes: a depth counter so only the outermost call is touched, the
+   post hook restores the old value only if the engine left ours alone, a null usercmd
+   skip (upstream issue #75), and the depth resets on map start.
+
+Reproduced with a human hunter on a test server: the old code crashed with the same log
+flood, the fixed one logs one damage line and a normal kill. Both fixes must go together.
 
 ## The witch corner fix
 
