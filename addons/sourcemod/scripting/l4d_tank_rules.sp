@@ -5,7 +5,7 @@
 #include <sdktools>
 #include <sdkhooks>
 
-#define PLUGIN_VERSION "1.2"
+#define PLUGIN_VERSION "1.3"
 
 #define TEAM_SURVIVOR		2
 #define TEAM_INFECTED		3
@@ -21,11 +21,12 @@
 // WeaponCanUse fires every tick while E is held on a gun.
 #define HINT_COOLDOWN		3.0
 
-// ForEachTerrorPlayer<CalcAndSetVersusMaxFlowDistance>+0xd0 is "jbe keep
-// stored", taken when a survivor's current flow is not past their stored
-// furthest flow. As an unconditional jmp the stored value is always kept, so
-// every survivor's distance freezes. The spec has the disassembly.
-#define BYTE_KEEP_IF_BEHIND	0x76	// jbe rel8
+// The patch site is the conditional jump that keeps a survivor's stored
+// furthest flow when their current flow is not past it (Linux: jbe in
+// ForEachTerrorPlayer<CalcAndSetVersusMaxFlowDistance>; Windows: jne in the
+// small store helper it calls). As an unconditional jmp the stored value is
+// always kept, so every survivor's distance freezes. The gamedata holds the
+// original opcode and the bytes around it for each platform.
 #define BYTE_ALWAYS_KEEP	0xEB	// jmp rel8
 
 // l4d_tank_rules_weapons
@@ -37,6 +38,7 @@
 ConVar g_hCvarRush, g_hCvarWeapons;
 
 Address g_pPatch = Address_Null;	// patch site, Address_Null when not found
+int g_iKeepByte;					// the site's original opcode (jbe on Linux, jne on Windows)
 bool g_bRoundLive;					// between round_start and round_end
 bool g_bTankAlive;
 float g_fTankGraceUntil;			// game time until which a vanished tank still counts
@@ -133,11 +135,15 @@ void FindPatchSite()
 
 	Address fn = gd.GetAddress("CalcAndSetVersusMaxFlowDistance");
 	int offset = gd.GetOffset("keep_stored_jbe");
+	int keep = gd.GetOffset("keep_stored_opcode");
+	int rel = gd.GetOffset("keep_stored_rel8");
+	int storeAt = gd.GetOffset("keep_stored_store_at");
+	int member = gd.GetOffset("keep_stored_member");
 	delete gd;
 
-	if( fn == Address_Null || offset == -1 )
+	if( fn == Address_Null || offset == -1 || keep == -1 || rel == -1 || storeAt == -1 || member == -1 )
 	{
-		LogError("Could not find ForEachTerrorPlayer<CalcAndSetVersusMaxFlowDistance>; no-rush is off.");
+		LogError("Could not find the CalcAndSetVersusMaxFlowDistance patch site in gamedata; no-rush is off.");
 		return;
 	}
 
@@ -148,31 +154,26 @@ void FindPatchSite()
 	// behind. Nothing else writes this byte, so take it back either way. The
 	// rest of the site must match too: an unrelated EB elsewhere must never be
 	// turned into a jbe.
-	if( (b != BYTE_KEEP_IF_BEHIND && b != BYTE_ALWAYS_KEEP) || !SiteContextMatches(site) )
+	if( (b != keep && b != BYTE_ALWAYS_KEEP) || !SiteContextMatches(site, rel, storeAt, member) )
 	{
 		LogError("Unexpected bytes at CalcAndSetVersusMaxFlowDistance+%d (0x%02X); engine build differs, no-rush is off.", b, offset);
 		return;
 	}
 
 	g_pPatch = site;
-	WriteSite(BYTE_KEEP_IF_BEHIND);
+	g_iKeepByte = keep;
+	WriteSite(g_iKeepByte);
 	LogMessage("No-rush patch site found at CalcAndSetVersusMaxFlowDistance+%d.", offset);
 }
 
-// The jump's rel8 (0x20, to the keep-stored path) and, 12 bytes on, the store
-// it skips: fsts 0x2b74(%ebp), d9 95 74 2b 00 00.
-bool SiteContextMatches(Address site)
+// The jump's rel8 (to the keep-stored path) and, storeAt bytes on, the x87
+// store it skips: D9 <modrm> <member offset>, e.g. Linux fsts 0x2b74(%ebp) is
+// d9 95 74 2b 00 00, Windows fstp [ecx+0x2b60] is d9 99 60 2b 00 00.
+bool SiteContextMatches(Address site, int rel, int storeAt, int member)
 {
-	static const int context[] = { 0xD9, 0x95, 0x74, 0x2B, 0x00, 0x00 };
-
-	if( (LoadFromAddress(site + view_as<Address>(1), NumberType_Int8) & 0xFF) != 0x20 ) return false;
-
-	for( int i = 0; i < sizeof(context); i++ )
-	{
-		if( (LoadFromAddress(site + view_as<Address>(12 + i), NumberType_Int8) & 0xFF) != context[i] ) return false;
-	}
-
-	return true;
+	if( (LoadFromAddress(site + view_as<Address>(1), NumberType_Int8) & 0xFF) != rel ) return false;
+	if( (LoadFromAddress(site + view_as<Address>(storeAt), NumberType_Int8) & 0xFF) != 0xD9 ) return false;
+	return LoadFromAddress(site + view_as<Address>(storeAt + 2), NumberType_Int32) == member;
 }
 
 int ReadSite()
@@ -190,7 +191,7 @@ void WriteSite(int value)
 
 void SetFrozen(bool frozen)
 {
-	WriteSite(frozen ? BYTE_ALWAYS_KEEP : BYTE_KEEP_IF_BEHIND);
+	WriteSite(frozen ? BYTE_ALWAYS_KEEP : g_iKeepByte);
 }
 
 public void ConVarChanged_Rush(ConVar convar, const char[] oldValue, const char[] newValue)

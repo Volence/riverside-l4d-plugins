@@ -18,7 +18,7 @@ Each plugin ships as source (`addons/sourcemod/scripting`) and compiled
 | `l4d_tank_burn_cap` | 1.0 | | Caps total fire damage on the tank so a molotov chips it instead of killing it. |
 | `l4d_vote_lock` | 1.0 | | Makes `!load`, `!match`, `!mode`, `!changemap`, `!cm` and `!setscores` admin only. An admin override does nothing on commands registered with `RegConsoleCmd`, so this uses a command listener instead. |
 | `l4d_hunter_phantom_fix` | 0.1 | | Stops a hunter killed mid-pounce from carrying on shredding (sound and claw blood at the pin spot) on clients after it dies. See below. |
-| `l4d_tank_rules` | 1.2 | gamedata `l4d_tank_rules.txt` (Linux only) | While a tank is alive: survivor distance points are frozen, and primary weapon swaps can be locked, limited to one per tank, or made to cost a full reload. See below. |
+| `l4d_tank_rules` | 1.3 | gamedata `l4d_tank_rules.txt` (Linux + Windows) | While a tank is alive: survivor distance points are frozen, and primary weapon swaps can be locked, limited to one per tank, or made to cost a full reload. See below. |
 | `l4d_ledge_fix` | 1.0 | left4dhooks | Blocks ledge hangs over drops that could not hurt (a survivor hanging off a rock a few units above the floor). See below. |
 | `l4d_ping` | 3.7 | | Overwatch-style team pings: one bound key marks whatever you aim at (infected, item, weapon or spot) for your own team only. See below. |
 
@@ -145,8 +145,11 @@ Details:
   don't match (a different engine build), no-rush stays off and the weapon rules still
   work.
 
-The gamedata is for the **Linux L4D1** server binary (symbol plus offset 208). A
-Windows server needs its own signature for the same `jbe` in server.dll.
+The gamedata covers both L4D1 server binaries. On Linux it's the `jbe` at symbol plus
+offset 208. On Windows the same check sits in a small store helper, found by signature,
+where the `jne` at offset 19 gets the same `jmp`. The Windows site was read from the
+`server.dll` in the Steam client (md5 8f67a2ce); a dedicated server on another build
+just logs an error and runs with no-rush off.
 
 **Weapon swaps** (`l4d_tank_rules_weapons`, default 0). While a tank is alive:
 1 = nobody may pick up a different primary, 2 = only one survivor may, once per tank,
