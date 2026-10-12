@@ -5,7 +5,7 @@
 #include <sdkhooks>
 #include <dhooks>
 
-#define PLUGIN_VERSION "1.4-riverside2"
+#define PLUGIN_VERSION "1.4-riverside3"
 
 public Plugin myinfo =
 {
@@ -86,6 +86,8 @@ methodmap GameDataWrapper < GameData {
 	}
 }
 
+GlobalForward g_fwdPounceRewound;
+
 public void OnPluginStart()
 {
 	GameDataWrapper gd = new GameDataWrapper("l4d_lagcomp_skeet");
@@ -97,6 +99,23 @@ public void OnPluginStart()
 	g_iOffs_CTakeDamageInfo_m_hAttacker = gd.GetOffset("CTakeDamageInfo::m_hAttacker");
 	delete gd.CreateDetourOrFail("CTerrorPlayer::OnTakeDamageInternal", DTR_OnTakeDamageInternal, DTR_OnTakeDamageInternal_Post);
 	delete gd;
+
+	g_fwdPounceRewound = new GlobalForward("L4D_OnLagCompPounce", ET_Ignore, Param_Cell, Param_Cell, Param_Cell);
+}
+
+// riverside3: tell skill_detect what we decided. It reads m_isAttemptingToPounce in TraceAttack,
+// which runs BEFORE this detour, so on a hunter the server had already landed but the shooter saw
+// in the air it read 0, and the killing pellet (the engine clears the flag in OnPounceEnded before
+// the death) was not a skeet. 51 of 54 such skeets went uncounted 2026-10-10..12.
+
+void SetPounceFlag(int victim, int attacker, int value)
+{
+	SetEntProp(victim, Prop_Send, "m_isAttemptingToPounce", value);
+	Call_StartForward(g_fwdPounceRewound);
+	Call_PushCell(victim);
+	Call_PushCell(attacker);
+	Call_PushCell(value);
+	Call_Finish();
 }
 
 int g_iSaveClient;
@@ -152,7 +171,7 @@ MRESReturn DTR_OnTakeDamageInternal(int victim, DHookParam hParams)
 
 		g_iSave_m_isAttemptingToPounce = GetEntProp(victim, Prop_Send, "m_isAttemptingToPounce");
 		g_iSet_m_isAttemptingToPounce = flTargetTime >= flLungeStartTime;
-		SetEntProp(victim, Prop_Send, "m_isAttemptingToPounce", g_iSet_m_isAttemptingToPounce);
+		SetPounceFlag(victim, attacker, g_iSet_m_isAttemptingToPounce);
 	}
 	else
 	{
@@ -163,7 +182,7 @@ MRESReturn DTR_OnTakeDamageInternal(int victim, DHookParam hParams)
 
 			g_iSave_m_isAttemptingToPounce = GetEntProp(victim, Prop_Send, "m_isAttemptingToPounce");
 			g_iSet_m_isAttemptingToPounce = flTargetTime < flLungeEndTime;
-			SetEntProp(victim, Prop_Send, "m_isAttemptingToPounce", g_iSet_m_isAttemptingToPounce);
+			SetPounceFlag(victim, attacker, g_iSet_m_isAttemptingToPounce);
 		}
 	}
 

@@ -35,7 +35,7 @@ Rotoblin already ships (`Roto2-AZ_mod.phrases`), and build against the Rotoblin-
 | `l4d_current_survivor_progress` | 2.3-riverside2 | `!cur` uses the same true-flow numbers. |
 | `l4d_collision_adjustments` | 1.2h-riverside2 | A hunter aimed at a downed survivor now lands on him. Needs the CollisionHook extension. See below. |
 | `l4d_tankpunchstuckfix` | 0.6-riverside2 | A survivor a tank punch leaves inside the ceiling or a wall is put back where he really was. Needs left4dhooks. See below. |
-| `l4d_lagcomp_skeet` | 1.4-riverside2 | Actually runs on L4D1 (the attacker offset was the L4D2 one), and no longer crashes the server when a skeet ends a pounce. Needs DHooks. See below. |
+| `l4d_lagcomp_skeet` | 1.4-riverside3 | Actually runs on L4D1 (the attacker offset was the L4D2 one), no longer crashes the server when a skeet ends a pounce, and tells stat plugins about the skeets it rescues. Needs DHooks. See below. |
 
 Our `l4d2_skill_detect` (skeet assists with reports off) and `l4d_rock_lagcomp` (`OnTankRockSkeeted` forward) fixes were merged upstream in 2026-09: use Harry's `l4d2_skill_detect` 2.4h ([L4D1_2-Plugins](https://github.com/fbef0102/L4D1_2-Plugins/tree/master/l4d2_skill_detect)) and `l4d_rock_lagcomp` 1.14 ([Rotoblin-AZMod](https://github.com/fbef0102/Rotoblin-AZMod)).
 
@@ -88,6 +88,15 @@ shooter saw, so skeets count the same at any ping. Two problems on L4D1:
    628, 2026-10-10). Fixes: a depth counter so only the outermost call is touched, the
    post hook restores the old value only if the engine left ours alone, a null usercmd
    skip (upstream issue #75), and the depth resets on map start.
+3. **Stat plugins miss the skeets it rescues.** It sets the flag inside
+   `OnTakeDamageInternal`, which runs after `TraceAttack`. `l4d2_skill_detect` reads the flag
+   in `TraceAttack`, so a hunter the server had already landed but the shooter hit in the
+   air read as "not pouncing". The engine interrupted the pounce (a real skeet) and
+   skill_detect never counted it: 51 of 54 such skeets went uncounted on our servers
+   over two days. The plugin now fires
+   `forward void L4D_OnLagCompPounce(int hunter, int attacker, int pouncing)` with its
+   decision. To fix skill_detect, implement that forward and set
+   `g_fHunterTracePouncing[hunter] = pouncing ? GetEngineTime() : 0.0;`.
 
 Reproduced with a human hunter on a test server: the old code crashed with the same log
 flood, the fixed one logs one damage line and a normal kill. Both fixes must go together.
