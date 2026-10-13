@@ -20,6 +20,7 @@ Each plugin ships as source (`addons/sourcemod/scripting`) and compiled
 | `l4d_hunter_phantom_fix` | 0.1 | | Stops a hunter killed mid-pounce from carrying on shredding (sound and claw blood at the pin spot) on clients after it dies. See below. |
 | `l4d_tank_rules` | 1.3 | gamedata `l4d_tank_rules.txt` (Linux + Windows) | While a tank is alive: survivor distance points are frozen, and primary weapon swaps can be locked, limited to one per tank, or made to cost a full reload. See below. |
 | `l4d_ledge_fix` | 1.0 | left4dhooks | Blocks ledge hangs over drops that could not hurt (a survivor hanging off a rock a few units above the floor). See below. |
+| `l4d_fling_fall_fix` | 1.1 | | Stops survivors dying to "fell too far" from short drops after a tank punch: fall damage is taken from the speed gravity could give. See below. |
 | `l4d_ping` | 3.7 | | Overwatch-style team pings: one bound key marks whatever you aim at (infected, item, weapon or spot) for your own team only. See below. |
 
 ## Fixed forks of existing plugins
@@ -206,6 +207,29 @@ into a real pit still counts as the full drop. A grab over a real drop passes.
 
 Cvars: `l4d_ledge_fix_enable` (0 off, 1 block, 2 log only), `l4d_ledge_fix_log`
 (1 writes every judged grab to `logs/ledge_fix.log`).
+
+## The fling fall fix
+
+Fall damage only looks at how fast a survivor is moving down when they land:
+((speed - `fall_speed_safe`) / (`fall_speed_fatal` - `fall_speed_safe`))^2 * 100, and
+above `survivor_incap_max_fall_damage` (200) the survivor dies instead of being
+incapped ("is dying instead of incapping because they fell too far"). A tank punch
+throws a survivor sideways at about 1200 u/s. When that fling clips an overhang or a
+sloped edge, the movement code redirects the speed along the surface and part of it
+becomes downward speed in a single tick (we measured -510 to -727 u/s under the farm03
+bridge and -88 to -856 u/s on the smalltown02 ditch edge). The landing then counts as
+a 400+ unit fall and kills a survivor who dropped 100 to 250 units.
+
+The plugin follows each airborne survivor's vertical speed every tick but never lets
+it grow faster than gravity allows. On a fall damage hit it turns the game's damage
+back into a landing speed; if that beats the gravity-only speed by more than
+`l4d_fling_fall_fix_margin` (50 u/s), the damage is recomputed from the gravity-only
+speed. Ordinary falls, where gravity is the only thing speeding you up, are never
+changed. Tracking restarts while a smoker or hunter holds the survivor, so a tongue
+pulling someone down keeps its real speed.
+
+Cvars: `l4d_fling_fall_fix_enable` (0 off, 1 fix, 2 log only), `l4d_fling_fall_fix_log`
+(1 writes every corrected fall to `logs/fling_fall_fix.log`), `l4d_fling_fall_fix_margin`.
 
 ## Ping
 
