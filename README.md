@@ -13,6 +13,7 @@ Each plugin ships as source (`addons/sourcemod/scripting`) and compiled
 |---|---|---|---|
 | `l4d_witch_corner_fix` | 1.0.0 | DHooks, gamedata `l4d_witch_corner_fix.txt` | Stops a startled witch freezing on corners when `nb_update_frequency` is low (we run 0.014). See below. |
 | `l4d_witch_unstuck` | 2.4.1 | left4dhooks | Fallback for a witch that makes no progress toward her target for 3 s: nudges her 8/16/24 units off the snag, then allows a short hop to a nearby nav spot (at most 120 units sideways, never when she is already within 120 units of her target). `!stuckwitch` logs a snapshot for admins. |
+| `l4d_witch_fire_fix` | 1.0.0 | none | Map fire (fire barrels, burning cars) no longer sets the witch alight, so a startled witch keeps her target. Survivor molotovs and gas cans still burn her. See below. |
 | `l4d_saferoom_lock` | 1.2 | left4dhooks | Holds the end saferoom door open and unusable while a tank or witch is still alive. |
 | `l4d_skypounce` | 0.4.0 | | Stops hunters chaining pounces off the sky brush ("ceiling pouncing"). Mode 1 is Zen's rule, mode 2 a last-surface-touched rule. |
 | `l4d_tank_burn_cap` | 1.0 | | Caps total fire damage on the tank so a molotov chips it instead of killing it. |
@@ -121,6 +122,21 @@ handles the engine bug, and unstuck covers geometry the fix can't (props wedged
 against walls and the like).
 
 Thanks to Harry for the `nb_update_frequency` tip that led to the root cause.
+
+## The witch fire fix
+
+A burning witch chases whoever set her on fire. Fire barrels and burning cars carry a
+burn `trigger_hurt` that hurts NPCs too (spawnflags 67), so a startled witch that walks
+or stalls on one catches fire, every burn tick is credited to the trigger instead of a
+survivor, and she drops the survivor she was chasing and wanders. The Dead Air 3 barrel
+by the garage (-4581 -903) is a spot she climbs.
+
+The plugin drops burn damage to a witch unless a survivor dealt it, which also keeps her
+from igniting. Molotovs and gas cans are unchanged: every tick of those is credited to
+the survivor who lit her. On a test server with the Dead Air 3 barrel: stock, she burned,
+wandered and died about 20 s later without reaching her target; with the fix she never
+ignited and incapped her target in 7.6 s; lit by a survivor, she still burned and incapped
+that survivor in 4.1 s. No gamedata, works on any OS.
 
 ## The hunter phantom shred fix
 
