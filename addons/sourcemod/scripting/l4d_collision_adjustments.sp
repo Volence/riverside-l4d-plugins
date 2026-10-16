@@ -3,12 +3,13 @@
 #include <sourcemod>
 #include <left4dhooks>
 #include <collisionhook>
+#include <dhooks>
 public Plugin myinfo = 
 {
 	name = "[L4D1/L4D2] Collision Adjustments",
 	author = "Sir, Harry Potter",
 	description = "No collisions to fix a handful of silly collision bugs in l4d",
-	version = "1.2h-2026/10/5-riverside2",
+	version = "1.2h-2026/10/5-riverside3",
 	url = "http://steamcommunity.com/profiles/76561198026784913"
 }
 
@@ -54,6 +55,15 @@ int g_iPounceAimTarget[MAXPLAYERS+1];
 bool g_bPulled[MAXPLAYERS + 1] = {false, ...};
 float g_fPouncingStartTime[MAXPLAYERS+1];
 
+// riverside3: CH_PassFilter sees every trace between the two entities, bullets included, so a
+// downed survivor's pistol shots went through a pouncing hunter for 0.09 s. The hunter rule is a
+// movement fix, so it now applies only while that hunter's own movement runs
+// (CTerrorGameMovement::PlayerMove, where his lunge collides). g_pMovePlayer is the player being
+// moved, Address_Null outside PlayerMove. Without the gamedata the rule applies to every trace, as before.
+Address g_pMovePlayer = Address_Null;
+int g_iOffsMovePlayer = -1;
+bool g_bMoveGate;
+
 
 #define MAXENTITIES                   2048
 
@@ -96,6 +106,18 @@ public void OnPluginStart()
 	g_hCvarSIThroughWitch.AddChangeHook(ConVarChanged);
 	g_hCvarClientPushPipeBombFix.AddChangeHook(ConVarChanged);
 	
+	GameData gd = new GameData("l4d_no_m2_movement_block");
+	if (gd != null)
+	{
+		g_iOffsMovePlayer = gd.GetOffset("CTerrorGameMovement::m_pPlayer");
+		DynamicDetour dt = DynamicDetour.FromConf(gd, "CTerrorGameMovement::PlayerMove");
+		if (g_iOffsMovePlayer != -1 && dt != null && dt.Enable(Hook_Pre, DTR_PlayerMove_Pre) && dt.Enable(Hook_Post, DTR_PlayerMove_Post))
+			g_bMoveGate = true;
+		delete gd;
+	}
+	if (!g_bMoveGate)
+		LogError("CTerrorGameMovement::PlayerMove (l4d_no_m2_movement_block gamedata) unavailable: the hunter/incap rule also applies to bullets");
+
 	HookEvent("tongue_grab", Event_SurvivorPulled);
 	HookEvent("tongue_release", Event_PullEnd);
 	HookEvent("round_start", event_RoundStart, EventHookMode_PostNoCopy);
@@ -142,6 +164,24 @@ void GetCvars()
 	g_bCvarClientPushPipeBombFix = g_hCvarClientPushPipeBombFix.BoolValue;
 }
 
+MRESReturn DTR_PlayerMove_Pre(Address pThis)
+{
+	g_pMovePlayer = view_as<Address>(LoadFromAddress(pThis + view_as<Address>(g_iOffsMovePlayer), NumberType_Int32));
+	return MRES_Ignored;
+}
+
+MRESReturn DTR_PlayerMove_Post(Address pThis)
+{
+	g_pMovePlayer = Address_Null;
+	return MRES_Ignored;
+}
+
+// true while this hunter's own movement is being run (or always, without the gamedata)
+bool HunterMoving(int hunter)
+{
+	return !g_bMoveGate || (g_pMovePlayer != Address_Null && g_pMovePlayer == GetEntityAddress(hunter));
+}
+
 public Action CH_PassFilter(int ent1, int ent2, bool &result)
 {
 	// riverside1: every rule below needs two clients, or a non-client whose g_iEntityType is known.
@@ -162,7 +202,7 @@ public Action CH_PassFilter(int ent1, int ent2, bool &result)
 		{
 			if( g_bCvarHunterThroughInacp && team1 == L4D_TEAM_SUR && L4D_IsPlayerIncapacitated(ent1)
 				&& GetClientTeam(ent2) == L4D_TEAM_INF && GetZombieClass(ent2) == ZC_HUNTER && IsStartToPounce(ent2)
-				&& g_iPounceAimTarget[ent2] != ent1)
+				&& g_iPounceAimTarget[ent2] != ent1 && HunterMoving(ent2))
 			{
 				result = false;
 				return Plugin_Handled;
@@ -206,7 +246,7 @@ public Action CH_PassFilter(int ent1, int ent2, bool &result)
 		{
 			if( g_bCvarHunterThroughInacp && team2 == L4D_TEAM_SUR && L4D_IsPlayerIncapacitated(ent2)
 				&& GetClientTeam(ent1) == L4D_TEAM_INF && GetZombieClass(ent1) == ZC_HUNTER && IsStartToPounce(ent1)
-				&& g_iPounceAimTarget[ent1] != ent2 )
+				&& g_iPounceAimTarget[ent1] != ent2 && HunterMoving(ent1) )
 			{
 				result = false;
 				return Plugin_Handled;

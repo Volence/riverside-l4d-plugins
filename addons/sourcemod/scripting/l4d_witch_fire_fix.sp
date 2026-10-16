@@ -9,6 +9,12 @@
  * Burn damage to a witch is dropped unless a survivor dealt it, so the map fire never
  * lights her. Molotovs, gas cans and a burning witch a survivor lit are untouched: the
  * survivor is the attacker on every tick of those.
+ *
+ * 1.0.1: CEntityFlame::FlameThink (server.so 0x43b5e6) credits each burn tick to whoever lit
+ * her only while that player is still a team-2 client. If the survivor who lit her left, went
+ * idle or changed team, 1.0.0 dropped the ticks and she burned forever without dying. Burn
+ * damage dealt by her own flame (her m_hEffectEntity) is now always let through: map fire
+ * never gets to light her, so a flame of her own was started by a survivor.
  */
 #include <sourcemod>
 #include <sdktools>
@@ -22,7 +28,7 @@ public Plugin myinfo =
 	name = "L4D Witch Fire Fix",
 	author = "Malevolence",
 	description = "Map fire no longer burns the witch",
-	version = "1.0.0",
+	version = "1.0.1",
 	url = ""
 };
 
@@ -43,6 +49,9 @@ public Action OnWitchDamage(int victim, int &attacker, int &inflictor, float &da
 {
 	if (!(damagetype & DMG_BURN)) return Plugin_Continue;
 	if (attacker >= 1 && attacker <= MaxClients && IsClientInGame(attacker) && GetClientTeam(attacker) == 2)
+		return Plugin_Continue;
+	int flame = GetEntPropEnt(victim, Prop_Send, "m_hEffectEntity");
+	if (flame > MaxClients && inflictor == flame)
 		return Plugin_Continue;
 	return Plugin_Handled;
 }

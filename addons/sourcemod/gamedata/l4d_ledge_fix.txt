@@ -1,0 +1,16 @@
+"Games"
+{
+	"left4dead"
+	{
+		"Signatures"
+		{
+			// float CTerrorPlayer::EstimateFallingDamage(): the game's own prediction, the one
+			// CTerrorGameMovement::CheckForLedges tests against 95 (server.so 0x6a5d10)
+			"CTerrorPlayer::EstimateFallingDamage"
+			{
+				"library"	"server"
+				"linux"		"@_ZN13CTerrorPlayer21EstimateFallingDamageEv"
+			}
+		}
+	}
+}

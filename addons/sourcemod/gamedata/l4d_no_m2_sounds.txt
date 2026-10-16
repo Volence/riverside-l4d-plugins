@@ -1,0 +1,16 @@
+"Games"
+{
+	"left4dead"
+	{
+		"Offsets"
+		{
+			// CTerrorPlayer's attack vocal CountdownTimer (vtable at +0, duration +4, timestamp +8).
+			// CTerrorPlayer::UpdateZombieSounds (0x7a1bd0) plays the class Attack sound while the
+			// claw IsAttacking() and this timer has run out, then restarts it for 0.2 s.
+			"CTerrorPlayer::m_attackSoundTimer"
+			{
+				"linux"		"7696"
+			}
+		}
+	}
+}
