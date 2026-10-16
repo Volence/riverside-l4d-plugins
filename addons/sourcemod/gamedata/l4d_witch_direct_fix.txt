@@ -1,0 +1,68 @@
+"Games"
+{
+	"left4dead"
+	{
+		"Signatures"
+		{
+			// mov eax,[esp+4]; mov eax,[eax+OFFSET]; ret -- where the witch keeps her locomotion
+			"Witch::GetLocomotionInterface"
+			{
+				"library"	"server"
+				"linux"		"@_ZNK5Witch22GetLocomotionInterfaceEv"
+			}
+			"WitchLocomotion::vtable"
+			{
+				"library"	"server"
+				"linux"		"@_ZTV15WitchLocomotion"
+			}
+			// windows has no symbols: this builds the WitchLocomotion, so it holds both its
+			// vtable (mov [edi],imm32 at +0x39) and where the witch keeps it (+0x48)
+			"Witch::CreateComponents"
+			{
+				"library"	"server"
+				"windows"	"\x56\x57\x68\x48\x01\x00\x00\x8B\xF1\xE8\x2A\x2A\x2A\x2A\x8B\xF8\x83\xC4\x04\x85\xFF\x74\x2A\x85\xF6\x74\x08\x8D"
+			}
+		}
+		"Addresses"
+		{
+			"GetLocomotionInterface"
+			{
+				"linux"
+				{
+					"signature"	"Witch::GetLocomotionInterface"
+				}
+				"windows"
+				{
+					"signature"	"Witch::CreateComponents"
+				}
+			}
+			"WitchLocomotionVtable"
+			{
+				"linux"
+				{
+					"signature"	"WitchLocomotion::vtable"
+				}
+				"windows"
+				{
+					"signature"	"Witch::CreateComponents"
+					"read"		"59"
+				}
+			}
+		}
+		"Offsets"
+		{
+			"Platform"
+			{
+				"linux"		"1"
+				"windows"	"2"
+			}
+			// ILocomotion::IsPotentiallyTraversable in the WitchLocomotion vtable, linux 0x14c / 4;
+			// windows has one destructor slot, not two
+			"ILocomotion::IsPotentiallyTraversable"
+			{
+				"linux"		"83"
+				"windows"	"82"
+			}
+		}
+	}
+}

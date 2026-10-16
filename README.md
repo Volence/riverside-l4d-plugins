@@ -14,6 +14,7 @@ Each plugin ships as source (`addons/sourcemod/scripting`) and compiled
 |---|---|---|---|
 | `l4d_witch_corner_fix` | 1.0.0 | DHooks, gamedata `l4d_witch_corner_fix.txt` | Stops a startled witch freezing on corners when `nb_update_frequency` is low (we run 0.014). See below. |
 | `l4d_witch_unstuck` | 2.5.0 | left4dhooks, gamedata `l4d_witch_unstuck.txt` (Linux) | Fallback for a witch that makes no progress toward her target for 3 s: nudges her 8/16/24 units off the snag, then allows a short hop to a nearby nav spot (at most 120 units sideways, never when she is already within 120 units of her target). `!stuckwitch` logs a snapshot for admins. 2.5.0: never moves her off someone she is killing (a survivor who body-blocks her twice silently becomes her victim), and a witch set off by a smoker, lunging hunter or tank is tracked toward the survivor that player is moving, as the game does. |
+| `l4d_witch_direct_fix` | 1.1.0 | DHooks, gamedata `l4d_witch_direct_fix.txt` (Linux + Windows) | A startled witch no longer drops her path to run straight at a survivor across a pit or open air, which made her pace back and forth below survivors standing on a ledge. See below. |
 | `l4d_witch_fire_fix` | 1.0.1 | none | Map fire (fire barrels, burning cars) no longer sets the witch alight, so a startled witch keeps her target. Survivor molotovs and gas cans still burn her, and 1.0.1 keeps a burning witch taking damage after the survivor who lit her leaves. See below. |
 | `l4d_saferoom_lock` | 1.2 | left4dhooks | Holds the end saferoom door open and unusable while a tank or witch is still alive. |
 | `l4d_skypounce` | 0.4.0 | | Stops hunters chaining pounces off the sky brush ("ceiling pouncing"). Mode 1 is Zen's rule, mode 2 a last-surface-touched rule. |
@@ -161,6 +162,33 @@ the survivor who lit her. On a test server with the Dead Air 3 barrel: stock, sh
 wandered and died about 20 s later without reaching her target; with the fix she never
 ignited and incapped her target in 7.6 s; lit by a survivor, she still burned and incapped
 that survivor in 4.1 s. No gamedata, works on any OS.
+
+## The witch direct fix
+
+While she chases, the witch drops her nav path and runs straight at her victim whenever
+no climb or gap jump is coming up on the path and `ILocomotion::IsPotentiallyTraversable`
+says the straight line from her feet to the victim is clear. That check is a hull trace
+plus the 180 unit jump height limit. It never asks whether there is any floor under the
+line. So with a survivor up on a ledge and the witch walking up a ramp below them, the
+line goes through open air over the pit and passes. She turns off her path toward them,
+drops back below the ledge, loses the line, picks the path up again, climbs the ramp and
+does it again. In our replays that pacing made chases 3 to 6 times longer than the walk.
+
+The plugin hooks that check on each witch's own locomotion object (common and special
+infected never see it). When the game says yes to a line at least
+`l4d_witch_direct_fix_minlen` (96) units long, it traces down every
+`l4d_witch_direct_fix_step` (24) units along it. If the floor anywhere drops more than
+`l4d_witch_direct_fix_drop` (48) units below both the line and the victim's height, the
+answer becomes no and she keeps following her path. A clean drop down to a victim below
+her still passes. Shorter lines are left alone: those are the path follower's own
+look-ahead probes at ledge edges.
+
+On a test server, Death Toll 4 (survivor on the ledge above the crater) went from 18 s to
+6 s, and Blood Harvest 2 (the tilted train car) from 17 s to 6 s. Across 24 replay spots
+nothing else changed beyond run-to-run noise. `l4d_witch_direct_fix_mode` 0 turns it off
+(1 refuses every shortcut, for testing), and `l4d_witch_direct_fix_log 1` logs each
+refusal. The Windows offsets come from server.dll and match the layout the corner fix
+uses, but have not been run on a Windows server yet.
 
 ## The hunter phantom shred fix
 
