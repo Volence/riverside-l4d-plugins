@@ -61,7 +61,7 @@ float g_fTankPassUntil;		// game time until which a tank pass is in progress
 public Plugin myinfo =
 {
 	name = "[L4D1/2] Saferoom Boss Lock",
-	author = "Riverside",
+	author = "Malevolence",
 	description = "Keeps the end saferoom door locked while a tank or a witch is still alive.",
 	version = PLUGIN_VERSION,
 	url = ""

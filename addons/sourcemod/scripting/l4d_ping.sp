@@ -77,7 +77,7 @@ ConVar g_cvDebug;
 public Plugin myinfo =
 {
     name        = "L4D1 Ping System",
-    author      = "Riverside",
+    author      = "Malevolence",
     description = "Overwatch-style team ping system for competitive L4D1",
     version     = PLUGIN_VERSION,
     url         = "https://github.com/Volence/riverside-l4d-plugins"

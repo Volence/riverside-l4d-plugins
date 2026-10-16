@@ -57,7 +57,7 @@ static const char g_sPrimaries[][] =
 public Plugin myinfo =
 {
 	name = "[L4D1] Tank Rules",
-	author = "Riverside",
+	author = "Malevolence",
 	description = "While a tank is alive: survivor distance points are frozen, and primary swaps can be limited or cost a reload.",
 	version = PLUGIN_VERSION,
 	url = ""

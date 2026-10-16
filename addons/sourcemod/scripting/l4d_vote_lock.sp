@@ -37,7 +37,7 @@ ConVar g_cvEnabled;
 public Plugin myinfo =
 {
 	name = "Vote Lock",
-	author = "Riverside",
+	author = "Malevolence",
 	description = "Config, map and score votes are admin only",
 	version = PLUGIN_VERSION,
 	url = "https://riversidepug.com"
