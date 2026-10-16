@@ -22,13 +22,14 @@ Each plugin ships as source (`addons/sourcemod/scripting`) and compiled
 | `l4d_hunter_phantom_fix` | 0.1 | | Stops a hunter killed mid-pounce from carrying on shredding (sound and claw blood at the pin spot) on clients after it dies. See below. |
 | `l4d_tank_rules` | 1.3 | gamedata `l4d_tank_rules.txt` (Linux + Windows) | While a tank is alive: survivor distance points are frozen, and primary weapon swaps can be locked, limited to one per tank, or made to cost a full reload. See below. |
 | `l4d_ledge_fix` | 1.0 | left4dhooks | Blocks ledge hangs over drops that could not hurt (a survivor hanging off a rock a few units above the floor). See below. |
-| `l4d_fling_fall_fix` | 1.1 | | Stops survivors dying to "fell too far" from short drops after a tank punch: fall damage is taken from the speed gravity could give. See below. |
+| `l4d_fling_fall_fix` | 1.2 | | Stops survivors dying to "fell too far" from short drops after a tank punch: fall damage is taken from the speed gravity could give. See below. |
 | `l4d_ping` | 3.7 | | Overwatch-style team pings: one bound key marks whatever you aim at (infected, item, weapon or spot) for your own team only. See below. |
 | `l4d_tank_punch_lagcomp` | 1.0 (not live yet) | DHooks, gamedata `l4d_tank_punch_lagcomp.txt` | A human tank's punch is lag compensated whether M1 is tapped or held. Stock only rewinds survivors while attack is held, and the fist is tested 0.5 to 0.7 s after the click. See below. |
 | `l4d_tank_fair_punch` | 0.3.1 | DHooks, gamedata `l4d_tank_fair_punch.txt` | The windup-end target scan follows the fist: no free hit on a survivor the fist never came near, and a hit for one the fist visibly went through at the end of the windup. See below. |
 | `l4d_rock_double_fix` | 1.0 | DHooks, gamedata `l4d_rock_double_fix.txt` | One tank rock can no longer hurt a survivor twice in the same tick. See below. |
 | `l4d_tongue_target` | 0.2 (not live yet) | DHooks, gamedata `l4d_tongue_target.txt` | When the smoker's crosshair is on several survivors, the nearest one gets the tongue (stock picks by client order), and survivors are judged where the smoker saw them. See below. |
 | `l4d_tank_pass_fix` | 0.1 | left4dhooks | A passed tank no longer bounces to a third player 3 s later. About one human pass in ten, the old tank's offer fires a second lottery at the handoff; an offer for a human tank within one lottery of the last is that duplicate and is blocked. Every offer is logged to `logs/tank_pass_fix.log` (`l4d_tank_pass_fix 0` logs only). |
+| `l4d_hittable_desync_fix` | 1.0 | DHooks, gamedata `l4d_hittable_desync_fix.txt` (Linux) | Cars and other hittables stay where the server has them on every client, not only on clients running low violence. See below. |
 | `l4d_tank_reconnect` | 0.1-riverside1 | left4dhooks | A tank whose player drops gets the tank back on rejoin, with the same health, rage and pass count. |
 | `l4d_dead_bot_sweep` | 0.1-riverside1 | | Kicks dead infected bots that a pause kept alive, so they can't fill the infected team when the tank spawns (the tank bot was kicked for "infected team is full"). |
 | `l4d_nightmode` | 0.9-riverside1 | DHooks, gamedata `l4d_nightmode.txt`, `configs/l4d_nightmode.cfg` | Turns daytime maps into night at runtime, no BSP changes: lighting, exposure, fog, lamps and per-map looks from the config. See below. |
@@ -45,7 +46,7 @@ Rotoblin already ships (`Roto2-AZ_mod.phrases`), and build against the Rotoblin-
 | `l4d_boss_percent` | 1.6.3-riverside1 | Shows the same true-flow numbers as the patched boss vote. |
 | `l4d_current_survivor_progress` | 2.3-riverside2 | `!cur` uses the same true-flow numbers. |
 | `l4d_collision_adjustments` | 1.2h-riverside2 | A hunter aimed at a downed survivor now lands on him. Needs the CollisionHook extension. See below. |
-| `l4d_tankpunchstuckfix` | 0.6-riverside5 | A survivor a tank punch leaves inside the ceiling or a wall is put back where he really was. Needs left4dhooks. See below. |
+| `l4d_tankpunchstuckfix` | 0.6-riverside6 | A survivor a tank punch leaves inside the ceiling or a wall is put back where he really was. Needs left4dhooks. See below. |
 | `l4d_infected_collisions` | riverside1 | Forgetest's plugin with one cvar per mover: `l4d_infected_collisions_common` (1) lets commons walk through a pulled, choked or pounced survivor, `l4d_infected_collisions_witch` (0) keeps the witch colliding with him. Needs DHooks, gamedata `l4d_infected_collisions.txt`, and Forgetest's `gamedatawrapper` include. |
 | `l4d_lagcomp_skeet` | 1.4-riverside3 | Actually runs on L4D1 (the attacker offset was the L4D2 one), no longer crashes the server when a skeet ends a pounce, and tells stat plugins about the skeets it rescues. Needs DHooks. See below. |
 
@@ -87,7 +88,8 @@ Later fixes: the watch on a survivor ends when he disconnects, is pinned or the 
 changes (riverside3); debris such as hanging plants no longer counts as stuck, and each
 punch moves a survivor at most once of each kind, because looping the move every tick
 froze one survivor in the air until he took fall damage (riverside4); commons and the
-witch no longer count as stuck geometry (riverside5).
+witch no longer count as stuck geometry (riverside5); the stuck check uses the mask a
+survivor really moves with (0x14a0b), so survivor-only invisible walls count too (riverside6).
 
 ## Lag-compensated skeet on L4D1
 
@@ -260,8 +262,30 @@ speed. Ordinary falls, where gravity is the only thing speeding you up, are neve
 changed. Tracking restarts while a smoker or hunter holds the survivor, so a tongue
 pulling someone down keeps its real speed.
 
+1.2: only real landings are judged (the game credits them to the world), so map death
+pits, which are `trigger_hurt` volumes doing fall damage, still kill. Falls are judged by
+their peak gravity-limited speed, which can only make the plugin step in less often.
+
 Cvars: `l4d_fling_fall_fix_enable` (0 off, 1 fix, 2 log only), `l4d_fling_fall_fix_log`
 (1 writes every corrected fall to `logs/fling_fall_fix.log`), `l4d_fling_fall_fix_margin`.
+
+## The hittable desync fix
+
+The client keeps its own physics copy of every networked `prop_physics` and draws the prop
+where that copy is: physics runs after interpolation each frame and moves the prop onto it.
+Dead commons become client-only ragdolls in `COLLISION_GROUP_DEBRIS`, which collide with a
+prop in `COLLISION_GROUP_NONE`. Bodies pinned under or against a punched car hold the drawn
+car back while the real one keeps going, so it shows short of, or floating above, where it
+really is. Low violence (`-lv`) hides this because corpses are removed straight away.
+
+The plugin puts every hittable (the props with `m_hasTankGlow`) in collision group 19
+(`NPC_SCRIPTED`) when it spawns. In the game's collision rules 19 behaves like NONE against
+everything except groups 1, 2, 14 and 16, so survivors, infected, the tank, rocks and other
+props hit it as before. The tank's punch search (`IsPushableEntity`) wants NONE, so a detour
+answers it as if the prop were still NONE. The group is only set at spawn, never changed
+mid-game: clients do not recheck their physics contacts when a group changes. The cvar
+`l4d_hittable_desync_fix` (1) and a late load therefore only affect props spawned afterwards.
+`sm_hittable_fix_status` lists what was moved.
 
 ## Ping
 

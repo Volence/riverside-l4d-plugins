@@ -62,7 +62,7 @@ public Plugin:myinfo =
     name =          "Tank Punch Ceiling Stuck Fix",
     author =        "Tabun, Visor, HarryPotter",
     description =   "Fixes the problem where tank-punches get a survivor stuck in the roof,L4D1 windows signature by Harry",
-    version =       "0.6-2024/1/2-riverside5",
+    version =       "0.6-2024/1/2-riverside6",
     url =           "nope"
 }
 
@@ -495,7 +495,11 @@ bool HullInWorld(int client, const float pos[3], int &hit)
 	// riverside3 (audit B1): without CONTENTS_MONSTER, so commons or a witch standing in his
 	// hull do not count as "inside the world" (the collision ports let commons walk into a
 	// pinned survivor on purpose)
-	Handle tr = TR_TraceHullFilterEx(pos, pos, mins, maxs, MASK_PLAYERSOLID & ~CONTENTS_MONSTER, TraceFilter_PlayerBlockers);
+	// riverside6: a survivor's MOVEMENT mask (CTerrorGameMovement::PlayerSolidMask, brush-only
+	// survivor value 0x14a0b) also has 0x800 (survivor-only env_player_blocker) and 0x200; with
+	// MASK_PLAYERSOLID & ~CONTENTS_MONSTER (0x1400b) a survivor stuck inside a survivor-only
+	// blocker read as clear. l4d-source docs/annotated/player-hull/.
+	Handle tr = TR_TraceHullFilterEx(pos, pos, mins, maxs, 0x14a0b, TraceFilter_PlayerBlockers);
 	bool solid = TR_StartSolid(tr);
 	hit = TR_GetEntityIndex(tr);
 	delete tr;
