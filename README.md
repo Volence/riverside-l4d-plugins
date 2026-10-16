@@ -12,7 +12,7 @@ Each plugin ships as source (`addons/sourcemod/scripting`) and compiled
 
 | Plugin | Version | Needs | What it does |
 |---|---|---|---|
-| `l4d_witch_corner_fix` | 1.0.0 | DHooks, gamedata `l4d_witch_corner_fix.txt` | Stops a startled witch freezing on corners when `nb_update_frequency` is low (we run 0.014). See below. |
+| `l4d_witch_corner_fix` | 1.1.0 | DHooks, gamedata `l4d_witch_corner_fix.txt` (Linux + Windows) | Stops a startled witch freezing on corners when `nb_update_frequency` is low (we run 0.014). See below. |
 | `l4d_witch_unstuck` | 2.5.0 | left4dhooks, gamedata `l4d_witch_unstuck.txt` (Linux) | Fallback for a witch that makes no progress toward her target for 3 s: nudges her 8/16/24 units off the snag, then allows a short hop to a nearby nav spot (at most 120 units sideways, never when she is already within 120 units of her target). `!stuckwitch` logs a snapshot for admins. 2.5.0: never moves her off someone she is killing (a survivor who body-blocks her twice silently becomes her victim), and a witch set off by a smoker, lunging hunter or tank is tracked toward the survivor that player is moving, as the game does. |
 | `l4d_witch_direct_fix` | 1.1.0 | DHooks, gamedata `l4d_witch_direct_fix.txt` (Linux + Windows) | A startled witch no longer drops her path to run straight at a survivor across a pit or open air, which made her pace back and forth below survivors standing on a ledge. See below. |
 | `l4d_witch_fire_fix` | 1.0.1 | none | Map fire (fire barrels, burning cars) no longer sets the witch alight, so a startled witch keeps her target. Survivor molotovs and gas cans still burn her, and 1.0.1 keeps a burning witch taking damage after the survivor who lit her leaves. See below. |
@@ -140,7 +140,11 @@ enough to trip them.
 The plugin changes those two constants from 1 to 0 (`fld1` to `fldz`) only while
 `WitchLocomotion::Update` runs, and puts them back right after, so common infected
 never see the change. It checks the original bytes first and refuses to load if they
-don't match. The offsets in the gamedata are for the **Linux L4D1** server binary only.
+don't match. 1.1.0 adds Windows: there the two checks compare against a shared 1.0
+constant (`fcomp [1.0f]; fnstsw; test ah,5; jnp`), so instead of the constant the plugin
+flips each `jnp` to `jo`, which is never taken after a `test`. The Windows offsets come from
+server.dll and have not been run on a Windows server yet; on any byte mismatch the plugin
+refuses to load rather than patch the wrong place.
 
 Recommended setup: corner fix plus `l4d_witch_unstuck` in mode 2. The corner fix
 handles the engine bug, and unstuck covers geometry the fix can't (props wedged

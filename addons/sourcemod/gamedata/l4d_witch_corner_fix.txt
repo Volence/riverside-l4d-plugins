@@ -9,6 +9,7 @@
 			{
 				"library"	"server"
 				"linux"		"@_ZN19ZombieBotLocomotion16ResolveCollisionERK6VectorS2_i"
+				"windows"	"\x55\x8B\xEC\x83\xE4\xF0\x81\xEC\x84\x01\x00\x00\x53\x56\x57\x6A\x04\x6A\x00\x68\x2A\x2A\x2A\x2A"
 			}
 			// mov eax,[esp+4]; mov eax,[eax+OFFSET]; ret -- where the witch keeps her locomotion
 			"Witch::GetLocomotionInterface"
@@ -21,12 +22,23 @@
 				"library"	"server"
 				"linux"		"@_ZTV15WitchLocomotion"
 			}
+			// windows has no symbols: this builds the WitchLocomotion, so it holds both its
+			// vtable (mov [edi],imm32 at +0x39) and where the witch keeps it (+0x48)
+			"Witch::CreateComponents"
+			{
+				"library"	"server"
+				"windows"	"\x56\x57\x68\x48\x01\x00\x00\x8B\xF1\xE8\x2A\x2A\x2A\x2A\x8B\xF8\x83\xC4\x04\x85\xFF\x74\x2A\x85\xF6\x74\x08\x8D"
+			}
 		}
 		"Addresses"
 		{
 			"ResolveCollision"
 			{
 				"linux"
+				{
+					"signature"	"ZombieBotLocomotion::ResolveCollision"
+				}
+				"windows"
 				{
 					"signature"	"ZombieBotLocomotion::ResolveCollision"
 				}
@@ -37,6 +49,10 @@
 				{
 					"signature"	"Witch::GetLocomotionInterface"
 				}
+				"windows"
+				{
+					"signature"	"Witch::CreateComponents"
+				}
 			}
 			"WitchLocomotionVtable"
 			{
@@ -44,14 +60,26 @@
 				{
 					"signature"	"WitchLocomotion::vtable"
 				}
+				"windows"
+				{
+					"signature"	"Witch::CreateComponents"
+					"read"		"59"
+				}
 			}
 		}
 		"Offsets"
 		{
-			// ILocomotion::Update (ZombieBotLocomotion::Update) in the WitchLocomotion vtable, 0x94 / 4
+			"Platform"
+			{
+				"linux"		"1"
+				"windows"	"2"
+			}
+			// ILocomotion::Update (ZombieBotLocomotion::Update) in the WitchLocomotion vtable,
+			// linux 0x94 / 4; windows has one destructor slot, not two
 			"ILocomotion::Update"
 			{
-				"linux"	"37"
+				"linux"		"37"
+				"windows"	"36"
 			}
 		}
 	}
