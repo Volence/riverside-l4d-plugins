@@ -27,7 +27,7 @@ Each plugin ships as source (`addons/sourcemod/scripting`) and compiled
 | `l4d_tank_punch_lagcomp` | 1.0 | DHooks, gamedata `l4d_tank_punch_lagcomp.txt` | A human tank's punch is lag compensated whether M1 is tapped or held. Stock only rewinds survivors while attack is held, and the fist is tested 0.5 to 0.7 s after the click. See below. |
 | `l4d_tank_fair_punch` | 0.3.1 | DHooks, gamedata `l4d_tank_fair_punch.txt` | The windup-end target scan follows the fist: no free hit on a survivor the fist never came near, and a hit for one the fist visibly went through at the end of the windup. See below. |
 | `l4d_rock_double_fix` | 1.0 | DHooks, gamedata `l4d_rock_double_fix.txt` | One tank rock can no longer hurt a survivor twice in the same tick. See below. |
-| `l4d_tongue_target` | 0.2 | DHooks, gamedata `l4d_tongue_target.txt` | When the smoker's crosshair is on several survivors, the nearest one gets the tongue (stock picks by client order), and survivors are judged where the smoker saw them. See below. |
+| `l4d_tongue_target` | 0.3 | DHooks, gamedata `l4d_tongue_target.txt` | When the smoker's crosshair is on several survivors, the nearest one gets the tongue (stock picks by client order), and survivors are judged where the smoker saw them. See below. |
 | `l4d_tank_pass_fix` | 0.1 | left4dhooks | A passed tank no longer bounces to a third player 3 s later. About one human pass in ten, the old tank's offer fires a second lottery at the handoff; an offer for a human tank within one lottery of the last is that duplicate and is blocked. Every offer is logged to `logs/tank_pass_fix.log` (`l4d_tank_pass_fix 0` logs only). |
 | `l4d_hittable_desync_fix` | 1.0 | DHooks, gamedata `l4d_hittable_desync_fix.txt` (Linux) | Cars and other hittables stay where the server has them on every client, not only on clients running low violence. See below. |
 | `l4d_tank_reconnect` | 0.2 | left4dhooks (its `left4dhooks.l4d1.txt` gamedata) | A tank whose player drops gets the tank back on rejoin, with the same health, rage, rage grace timer, burning state and pass count, through the game's own bot handoff (`CTerrorPlayer::TakeOverZombieBot`). Works during a pause. |
@@ -394,7 +394,10 @@ When the tongue starts extending, the plugin scores again, using survivor positi
 rewound by the smoker's latency and lerp. Every survivor within
 `l4d_tongue_target_tie_deg` (1.0) of the best angle counts as on the crosshair, and the
 nearest of them gets the tongue. It only changes a tongue the game already aimed at
-someone (a miss stays a miss), and its pick must pass the game's own target checks.
+someone (a miss stays a miss), and its pick must pass the game's own target checks
+(alive and free, in `tongue_range`, inside the smoker's view cone, and an unblocked eye
+line). 0.3 matches the game's view cone exactly: it is flat, about 40 degrees to either
+side of the smoker's facing at any height (0.2 also refused survivors far above or below).
 `l4d_tongue_target_mode`: 0 off, 1 log only, 2 on. `l4d_tongue_target_log` writes
 `logs/tongue_target.log`; `l4d_tongue_target_bots` also judges AI smokers (for testing).
 

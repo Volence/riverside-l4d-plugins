@@ -5,7 +5,7 @@
 #include <sdktools>
 #include <dhooks>
 
-#define PLUGIN_VERSION "0.2"
+#define PLUGIN_VERSION "0.3"
 #define GAMEDATA "l4d_tongue_target"
 
 #define TEAM_SURVIVOR	2
@@ -42,11 +42,12 @@
 // It only ever changes a tongue the game already aimed at someone (a miss stays a miss),
 // and the survivor it picks must pass the game's own target filters right now (0.2, from
 // the server.so decompile, l4d-source docs/annotated/smoker-tongue/):
-//   * TongueTargetScan::IsPotentialTarget: alive, not incapped, ledge-hung, pinned or
-//     tongued, not FL_ONTRAIN or FL_FROZEN.
+//   * TongueTargetScan::IsPotentialTarget: alive, not incapped, falling from a ledge
+//     (m_isFallingFromLedge, +0x2712), pinned or tongued, not FL_ONTRAIN or FL_FROZEN.
 //   * Range: WorldSpaceCenter within tongue_range of the smoker's eye.
-//   * FInViewCone(WorldSpaceCenter): flat facing, 3D length, m_flFieldOfView 0.766, so a
-//     survivor more than about 40 degrees above or below the smoker is out.
+//   * FInViewCone(WorldSpaceCenter): a flat (yaw-only) cone, m_flFieldOfView 0.766, so a
+//     survivor more than about 40 degrees to either side of the smoker's facing is out, at
+//     any height (0.3: 0.2 kept the height in the length and refused steep picks the game allows).
 //   * IsTargetVisible: one ray eye to eye, mask 0x42006081, smoker ignored, common
 //     infected, the witch (Witch derives from Infected) and ghosts ignored, but survivors and
 //     special infected BLOCK. The flight (OnUpdateExtendingState) re-checks this line and
@@ -275,7 +276,8 @@ bool CanSee(int smoker, const float eye[3], int survivor)
 	return clear;
 }
 
-// CBaseCombatCharacter::FInViewCone: flat facing (yaw only), full 3D distance to the spot
+// CBaseCombatCharacter::FInViewCone: flat facing (yaw only) and a flat line to the spot: Valve sets the
+// eye height to the spot's (server.so 0x3a5d4c / 0x3a5d7b), an infinitely tall cone as in the SDK
 bool InViewCone(int smoker, const float eye[3], const float ang[3], const float spot[3])
 {
 	float fov = DEFAULT_FOV;
@@ -284,6 +286,7 @@ bool InViewCone(int smoker, const float eye[3], const float ang[3], const float 
 	yaw[1] = ang[1];
 	GetAngleVectors(yaw, facing, NULL_VECTOR, NULL_VECTOR);
 	SubtractVectors(spot, eye, los);
+	los[2] = 0.0;
 	float dot = GetVectorDotProduct(facing, los);
 	if( fov > 0.0 )
 	{
@@ -297,7 +300,7 @@ bool InViewCone(int smoker, const float eye[3], const float ang[3], const float 
 bool Grabbable(int s)
 {
 	if( !IsClientInGame(s) || GetClientTeam(s) != TEAM_SURVIVOR || !IsPlayerAlive(s) ) return false;
-	if( GetEntProp(s, Prop_Send, "m_isIncapacitated") || GetEntProp(s, Prop_Send, "m_isHangingFromLedge") ) return false;
+	if( GetEntProp(s, Prop_Send, "m_isIncapacitated") || GetEntProp(s, Prop_Send, "m_isFallingFromLedge") ) return false;	// +0x2712, as the game tests it (a hanging survivor is incapped)
 	if( GetEntPropEnt(s, Prop_Send, "m_tongueOwner") > 0 || GetEntPropEnt(s, Prop_Send, "m_pounceAttacker") > 0 ) return false;
 	if( GetEntityFlags(s) & (FL_ONTRAIN | FL_FROZEN) ) return false;	// 0x28, as the game tests it
 	return true;
