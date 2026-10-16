@@ -12,10 +12,8 @@ Each plugin ships as source (`addons/sourcemod/scripting`) and compiled
 
 | Plugin | Version | Needs | What it does |
 |---|---|---|---|
-| `l4d_witch_corner_fix` | 1.1.0 | DHooks, gamedata `l4d_witch_corner_fix.txt` (Linux + Windows) | Stops a startled witch freezing on corners when `nb_update_frequency` is low (we run 0.014). See below. |
+| `l4d_witch_fixes` | 1.0.0 | DHooks, gamedata `l4d_witch_fixes.txt` (Linux + Windows; the climb fix is Linux only) | The witch's movement fixes in one plugin: she no longer freezes on corners at a low `nb_update_frequency`, no longer cuts straight at a survivor over a pit or open air, no longer climbs and slides off the same prop or rounded ledge forever, and map fire no longer steals her target. Replaces `l4d_witch_corner_fix`, `l4d_witch_direct_fix` and `l4d_witch_fire_fix`. See below. |
 | `l4d_witch_unstuck` | 2.5.0 | left4dhooks, gamedata `l4d_witch_unstuck.txt` (Linux) | Fallback for a witch that makes no progress toward her target for 3 s: nudges her 8/16/24 units off the snag, then allows a short hop to a nearby nav spot (at most 120 units sideways, never when she is already within 120 units of her target). `!stuckwitch` logs a snapshot for admins. 2.5.0: never moves her off someone she is killing (a survivor who body-blocks her twice silently becomes her victim), and a witch set off by a smoker, lunging hunter or tank is tracked toward the survivor that player is moving, as the game does. |
-| `l4d_witch_direct_fix` | 1.1.0 | DHooks, gamedata `l4d_witch_direct_fix.txt` (Linux + Windows) | A startled witch no longer drops her path to run straight at a survivor across a pit or open air, which made her pace back and forth below survivors standing on a ledge. See below. |
-| `l4d_witch_fire_fix` | 1.0.1 | none | Map fire (fire barrels, burning cars) no longer sets the witch alight, so a startled witch keeps her target. Survivor molotovs and gas cans still burn her, and 1.0.1 keeps a burning witch taking damage after the survivor who lit her leaves. See below. |
 | `l4d_saferoom_lock` | 1.2 | left4dhooks | Holds the end saferoom door open and unusable while a tank or witch is still alive. |
 | `l4d_skypounce` | 0.4.0 | | Stops hunters chaining pounces off the sky brush ("ceiling pouncing"). Mode 1 is Zen's rule, mode 2 a last-surface-touched rule. |
 | `l4d_tank_burn_cap` | 1.0 | | Caps total fire damage on the tank so a molotov chips it instead of killing it. |
@@ -128,46 +126,39 @@ shooter saw, so skeets count the same at any ping. Two problems on L4D1:
 Reproduced with a human hunter on a test server: the old code crashed with the same log
 flood, the fixed one logs one damage line and a normal kill. Both fixes must go together.
 
-## The witch corner fix
+## The witch fixes
+
+`l4d_witch_fixes` holds four fixes for how a startled witch moves. Each has its own on/off cvar
+that works live (`l4d_witch_fixes_corner`, `_direct`, `_climb`, `_fire`, all 1 by default), and each
+checks its own hooks when the plugin loads: on Linux every vtable slot it hooks is compared with
+the function the server's symbols say should be there, and on Windows the patched bytes are
+checked. A fix that finds a mismatch (a game update moved something) turns only itself off and
+logs which one, so the others keep working. `l4d_witch_fixes_log 1` logs every change a fix makes.
+
+It replaces three separate plugins: remove `l4d_witch_corner_fix`, `l4d_witch_direct_fix` and
+`l4d_witch_fire_fix` (and their gamedata) when you install it, or the witch is hooked twice.
+
+Recommended setup: `l4d_witch_fixes` plus `l4d_witch_unstuck` in mode 2. These fixes remove the
+causes we have found, and unstuck catches whatever is left (and its log is how we find the next one).
+
+### Corners
 
 With `nb_update_frequency 0.014` (the default is 0.1), a startled witch can freeze
 against a corner at full speed with her run animation still playing. Blood Harvest 3
 (the fallen bridge railing) repeats it every time. The cause is in
 `ZombieBotLocomotion::ResolveCollision` in server.so. Two "moved less than 1 unit,
-give up" checks don't scale with the update interval, so at 0.014 each step is short
-enough to trip them.
+give up" checks don't scale with the update interval: at 0.014 her slide along a wall is
+about 0.05 units per step, so every step is thrown away.
 
 The plugin changes those two constants from 1 to 0 (`fld1` to `fldz`) only while
 `WitchLocomotion::Update` runs, and puts them back right after, so common infected
-never see the change. It checks the original bytes first and refuses to load if they
-don't match. 1.1.0 adds Windows: there the two checks compare against a shared 1.0
-constant (`fcomp [1.0f]; fnstsw; test ah,5; jnp`), so instead of the constant the plugin
-flips each `jnp` to `jo`, which is never taken after a `test`. The Windows offsets come from
-server.dll and have not been run on a Windows server yet; on any byte mismatch the plugin
-refuses to load rather than patch the wrong place.
-
-Recommended setup: corner fix plus `l4d_witch_unstuck` in mode 2. The corner fix
-handles the engine bug, and unstuck covers geometry the fix can't (props wedged
-against walls and the like).
+never see the change. On Windows the two checks compare against a shared 1.0 constant
+(`fcomp [1.0f]; fnstsw; test ah,5; jnp`), so instead of the constant the plugin flips each
+`jnp` to `jo`, which is never taken after a `test`.
 
 Thanks to Harry for the `nb_update_frequency` tip that led to the root cause.
 
-## The witch fire fix
-
-A burning witch chases whoever set her on fire. Fire barrels and burning cars carry a
-burn `trigger_hurt` that hurts NPCs too (spawnflags 67), so a startled witch that walks
-or stalls on one catches fire, every burn tick is credited to the trigger instead of a
-survivor, and she drops the survivor she was chasing and wanders. The Dead Air 3 barrel
-by the garage (-4581 -903) is a spot she climbs.
-
-The plugin drops burn damage to a witch unless a survivor dealt it, which also keeps her
-from igniting. Molotovs and gas cans are unchanged: every tick of those is credited to
-the survivor who lit her. On a test server with the Dead Air 3 barrel: stock, she burned,
-wandered and died about 20 s later without reaching her target; with the fix she never
-ignited and incapped her target in 7.6 s; lit by a survivor, she still burned and incapped
-that survivor in 4.1 s. No gamedata, works on any OS.
-
-## The witch direct fix
+### Straight-line cuts over gaps
 
 While she chases, the witch drops her nav path and runs straight at her victim whenever
 no climb or gap jump is coming up on the path and `ILocomotion::IsPotentiallyTraversable`
@@ -178,21 +169,50 @@ line goes through open air over the pit and passes. She turns off her path towar
 drops back below the ledge, loses the line, picks the path up again, climbs the ramp and
 does it again. In our replays that pacing made chases 3 to 6 times longer than the walk.
 
-The plugin hooks that check on each witch's own locomotion object (common and special
-infected never see it). When the game says yes to a line at least
-`l4d_witch_direct_fix_minlen` (96) units long, it traces down every
-`l4d_witch_direct_fix_step` (24) units along it. If the floor anywhere drops more than
-`l4d_witch_direct_fix_drop` (48) units below both the line and the victim's height, the
+The fix hooks that check on each witch's own locomotion object. When the game says yes to a
+line at least `l4d_witch_fixes_direct_minlen` (96) units long, it traces down every
+`l4d_witch_fixes_direct_step` (24) units along it. If the floor anywhere drops more than
+`l4d_witch_fixes_direct_drop` (48) units below both the line and the victim's height, the
 answer becomes no and she keeps following her path. A clean drop down to a victim below
 her still passes. Shorter lines are left alone: those are the path follower's own
-look-ahead probes at ledge edges.
+look-ahead probes at ledge edges. On a test server, Death Toll 4 (survivor on the ledge
+above the crater) went from 18 s to 6 s, and Blood Harvest 2 (the tilted train car) from
+17 s to 6 s.
 
-On a test server, Death Toll 4 (survivor on the ledge above the crater) went from 18 s to
-6 s, and Blood Harvest 2 (the tilted train car) from 17 s to 6 s. Across 24 replay spots
-nothing else changed beyond run-to-run noise. `l4d_witch_direct_fix_mode` 0 turns it off
-(1 refuses every shortcut, for testing), and `l4d_witch_direct_fix_log 1` logs each
-refusal. The Windows offsets come from server.dll and match the layout the corner fix
-uses, but have not been run on a Windows server yet.
+### Failed climbs (Linux only for now)
+
+The path follower climbs whatever its path runs into. That includes physics props the nav
+mesh knows nothing about (`Infected::IsAbleToClimbOnto` says yes to any walkable entity that
+is not a player or a door), and climb animations always end on a ledge's front lip, which on
+a rounded top is too steep to stand on. Either way she slides back off and starts the same
+climb again, for as long as nobody shoots her: on Dead Air 3 by the garage she did it 48
+times in 30 s. A new climb to the same landing spot from the same place within 3 s means the
+last one failed, and then:
+
+- onto a prop or other entity: that climb is refused before it starts, and the object is off
+  limits to her for `l4d_witch_fixes_climb_ban` (15) seconds, so she goes round it;
+- onto the map itself: the next climb there is watched, and when she reaches the lip she is
+  slid over 4 frames onto the first spot she can stand on, up to `l4d_witch_fixes_climb_assist`
+  (48) units ahead (floor no steeper than about 45 degrees, room for her hull). If there is no
+  such spot nothing moves.
+
+Climbs that work are never touched. On the Dead Air 3 garage spot she now reaches the survivor
+in about 8 s; without the fix she never does.
+
+### Map fire
+
+A burning witch chases whoever set her on fire. Fire barrels and burning cars carry a
+burn `trigger_hurt` that hurts NPCs too (spawnflags 67), so a startled witch that walks
+or stalls on one catches fire, every burn tick is credited to the trigger instead of a
+survivor, and she drops the survivor she was chasing and wanders. The fix drops burn damage
+to a witch unless a survivor dealt it or it comes from her own flame (lit by a survivor who
+has since left), which also keeps map fire from igniting her. Molotovs and gas cans are
+unchanged.
+
+### Windows
+
+The corner and direct fixes have Windows offsets taken from server.dll; they have not been
+run on a Windows server yet. The climb fix is Linux only and turns itself off on Windows.
 
 ## The hunter phantom shred fix
 
