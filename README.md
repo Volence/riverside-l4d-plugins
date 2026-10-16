@@ -1,7 +1,8 @@
 # Riverside L4D1 plugins
 
 SourceMod plugins from the Riverside PUG servers (Left 4 Dead 1 versus, Rotoblin-AZMod,
-100 tick, Linux). Everything here runs live on our servers.
+100 tick, Linux). Everything here runs live on our servers, except where the table says
+"not live yet".
 
 The folders mirror a server install: copy `addons/` and `cfg/` into `left4dead/`.
 Each plugin ships as source (`addons/sourcemod/scripting`) and compiled
@@ -23,6 +24,13 @@ Each plugin ships as source (`addons/sourcemod/scripting`) and compiled
 | `l4d_ledge_fix` | 1.0 | left4dhooks | Blocks ledge hangs over drops that could not hurt (a survivor hanging off a rock a few units above the floor). See below. |
 | `l4d_fling_fall_fix` | 1.1 | | Stops survivors dying to "fell too far" from short drops after a tank punch: fall damage is taken from the speed gravity could give. See below. |
 | `l4d_ping` | 3.7 | | Overwatch-style team pings: one bound key marks whatever you aim at (infected, item, weapon or spot) for your own team only. See below. |
+| `l4d_tank_punch_lagcomp` | 1.0 (not live yet) | DHooks, gamedata `l4d_tank_punch_lagcomp.txt` | A human tank's punch is lag compensated whether M1 is tapped or held. Stock only rewinds survivors while attack is held, and the fist is tested 0.5 to 0.7 s after the click. See below. |
+| `l4d_tank_fair_punch` | 0.3.1 | DHooks, gamedata `l4d_tank_fair_punch.txt` | The windup-end target scan follows the fist: no free hit on a survivor the fist never came near, and a hit for one the fist visibly went through at the end of the windup. See below. |
+| `l4d_rock_double_fix` | 1.0 | DHooks, gamedata `l4d_rock_double_fix.txt` | One tank rock can no longer hurt a survivor twice in the same tick. See below. |
+| `l4d_tongue_target` | 0.2 (not live yet) | DHooks, gamedata `l4d_tongue_target.txt` | When the smoker's crosshair is on several survivors, the nearest one gets the tongue (stock picks by client order), and survivors are judged where the smoker saw them. See below. |
+| `l4d_tank_reconnect` | 0.1-riverside1 | left4dhooks | A tank whose player drops gets the tank back on rejoin, with the same health, rage and pass count. |
+| `l4d_dead_bot_sweep` | 0.1-riverside1 | | Kicks dead infected bots that a pause kept alive, so they can't fill the infected team when the tank spawns (the tank bot was kicked for "infected team is full"). |
+| `l4d_nightmode` | 0.9-riverside1 | DHooks, gamedata `l4d_nightmode.txt`, `configs/l4d_nightmode.cfg` | Turns daytime maps into night at runtime, no BSP changes: lighting, exposure, fog, lamps and per-map looks from the config. See below. |
 
 ## Fixed forks of existing plugins
 
@@ -36,7 +44,8 @@ Rotoblin already ships (`Roto2-AZ_mod.phrases`), and build against the Rotoblin-
 | `l4d_boss_percent` | 1.6.3-riverside1 | Shows the same true-flow numbers as the patched boss vote. |
 | `l4d_current_survivor_progress` | 2.3-riverside2 | `!cur` uses the same true-flow numbers. |
 | `l4d_collision_adjustments` | 1.2h-riverside2 | A hunter aimed at a downed survivor now lands on him. Needs the CollisionHook extension. See below. |
-| `l4d_tankpunchstuckfix` | 0.6-riverside2 | A survivor a tank punch leaves inside the ceiling or a wall is put back where he really was. Needs left4dhooks. See below. |
+| `l4d_tankpunchstuckfix` | 0.6-riverside5 | A survivor a tank punch leaves inside the ceiling or a wall is put back where he really was. Needs left4dhooks. See below. |
+| `l4d_infected_collisions` | riverside1 | Forgetest's plugin with one cvar per mover: `l4d_infected_collisions_common` (1) lets commons walk through a pulled, choked or pounced survivor, `l4d_infected_collisions_witch` (0) keeps the witch colliding with him. Needs DHooks, gamedata `l4d_infected_collisions.txt`, and Forgetest's `gamedatawrapper` include. |
 | `l4d_lagcomp_skeet` | 1.4-riverside3 | Actually runs on L4D1 (the attacker offset was the L4D2 one), no longer crashes the server when a skeet ends a pounce, and tells stat plugins about the skeets it rescues. Needs DHooks. See below. |
 
 Our `l4d2_skill_detect` (skeet assists with reports off) and `l4d_rock_lagcomp` (`OnTankRockSkeeted` forward) fixes were merged upstream in 2026-09: use Harry's `l4d2_skill_detect` 2.4h ([L4D1_2-Plugins](https://github.com/fbef0102/L4D1_2-Plugins/tree/master/l4d2_skill_detect)) and `l4d_rock_lagcomp` 1.14 ([Rotoblin-AZMod](https://github.com/fbef0102/Rotoblin-AZMod)).
@@ -72,6 +81,12 @@ has restored everyone) hull-checks each survivor it hit. Anyone inside the world
 to his real position with his knockback kept, and is re-checked for 1 s, with
 `L4D_WarpToValidPositionIfStuck` as the last resort. `sm_punchstuckfix_solid 0` turns it
 off. Every rescue is logged to `logs/tank_punch_stuck.log`.
+
+Later fixes: the watch on a survivor ends when he disconnects, is pinned or the map
+changes (riverside3); debris such as hanging plants no longer counts as stuck, and each
+punch moves a survivor at most once of each kind, because looping the move every tick
+froze one survivor in the air until he took fall damage (riverside4); commons and the
+witch no longer count as stuck geometry (riverside5).
 
 ## Lag-compensated skeet on L4D1
 
@@ -269,6 +284,104 @@ to `cfg/sourcemod/l4d_ping.cfg`.
 
 Other plugins can use `scripting/include/l4d_ping.inc`: `L4DPing_Create` drops a ping
 for a player, and `L4DPing_OnPing` fires after every ping.
+
+## Tank punch lag compensation
+
+Each sweep of a tank's fist (once per usercmd for `tank_swing_duration`, 0.2 s, after
+the 0.5 s windup) starts lag compensation. Before rewinding a survivor, the game asks
+`CTerrorPlayer::WantsLagCompensationOnEntity`, which says yes only if the usercmd holds
+attack, or its command number is within 5 of the player's `m_iLastWeaponFireUsercmd`.
+Guns and melee weapons write that field; the tank's claw never does. So a tank who taps
+M1 has already let go when the fist is tested, and the punch is checked against where
+survivors are on the server now, not where the tank player saw them. Holding M1 through
+the swing got normal lag compensation.
+
+From the end of the windup to the end of the swing, the plugin keeps the tank's
+`m_iLastWeaponFireUsercmd` at his current command number, which opens the game's own
+check. The game's other checks and the rewind itself run as usual. Only lag
+compensation reads that field, and its old value is put back when the swing ends, so
+rock throws and everything else are untouched. Bot tanks are never lag compensated by
+the game and are left alone. Measured on a test server with a real client as the tank
+and four survivors in front, survivor checks rewound per 10 punches:
+
+| | Tapped M1 | Held M1 |
+|---|---|---|
+| Without the plugin | 0 of 360 | 299 of 324 (9 punches) |
+| With the plugin | 347 of 360 | 343 of 360 |
+
+The checks that still say no (with or without the plugin) come from the game's own
+checks, not from attack being held.
+
+Cvars: `l4d_tank_punch_lagcomp_enable`, `l4d_tank_punch_lagcomp_debug` (1 writes a line
+per punch to `logs/tank_punch_lagcomp.log`). `sm_punchlagcomp_stats` prints totals. The
+field's offset (Linux 6124) is in the gamedata.
+
+## Tank fair punch
+
+When the 0.5 s windup ends, `CTankClaw::OnWindupFinished` scans for a survivor within
+`tank_swing_range` (56) and inside a cone in front of the tank. If it finds one, the
+first fist sweep starts at that survivor's centre, a near-certain hit wherever the fist
+is. An audit of 2,988 punches from our matches found that moment wrong both ways: hits
+where the fist never came within 30 units of the victim, and survivors the fist visibly
+went through at the end of the windup but the scan skipped.
+
+The plugin changes only where that first sweep starts. If the scan picked a standing
+survivor the fist never came within `l4d_tank_fair_punch_veto_dist` (30) of during the
+windup, the sweep starts at the fist instead (he can still be hit the normal way). A
+survivor within `l4d_tank_fair_punch_veto_min_gap` (20) of the tank is never dropped, so
+hugging the tank is not a way to avoid punches. If the scan picked nobody, and the fist
+came within the fist radius of a standing survivor in the last
+`l4d_tank_fair_punch_add_time` (0.25 s) of the windup, in front of the tank and in its
+line of sight, the sweep starts at him, as the scan would have done. Distances use
+survivor positions rewound by the tank's latency and lerp.
+
+`l4d_tank_fair_punch_mode`: 0 off, 1 log only, 2 on (we run 2). `l4d_tank_fair_punch_log`
+and `_log_all` write `logs/tank_fair_punch.log`, with a line per punch and nearby
+survivor so any punch can be judged afterwards.
+
+## The rock double hit fix
+
+In one tick, a survivor's own movement can touch a point-blank tank rock:
+`BounceTouch` hurts him, the rock detonates, and `UTIL_Remove` only marks it for removal.
+Later in the same tick the rock's `ProximityThink` still runs and calls `BounceTouch`
+again, past the engine's touch checks, so he takes the hit twice (2 x 24 in versus).
+Only human victims are affected, because bot usercmds run after the rock's think. With
+`l4d_rock_double_fix 1`, a `BounceTouch` on a rock already marked for removal is
+skipped. Every rock hit is logged to `logs/rock_double_fix.log`, and
+`sm_rockfix_stats` prints the map's counts.
+
+## Tongue target
+
+While the ability is ready, the game keeps picking the smoker's target: each survivor in
+range and in sight is scored by the angle between the smoker's aim and the nearest point
+of his box, and the best score wins. When the crosshair passes through two or three
+survivors' boxes they all score perfectly, and the first in client order wins, so the
+tongue can fly past the survivor in front to one behind him. Survivors are also scored
+where the server has them, not where the smoker saw them.
+
+When the tongue starts extending, the plugin scores again, using survivor positions
+rewound by the smoker's latency and lerp. Every survivor within
+`l4d_tongue_target_tie_deg` (1.0) of the best angle counts as on the crosshair, and the
+nearest of them gets the tongue. It only changes a tongue the game already aimed at
+someone (a miss stays a miss), and its pick must pass the game's own target checks.
+`l4d_tongue_target_mode`: 0 off, 1 log only, 2 on. `l4d_tongue_target_log` writes
+`logs/tongue_target.log`; `l4d_tongue_target_bots` also judges AI smokers (for testing).
+
+## Night mode
+
+Turns daytime maps into night at runtime, without changing the maps. Every setting is
+per map, read from `configs/l4d_nightmode.cfg`; a map with no section there is left
+alone. The plugin darkens baked world lighting through lightstyle 0, clamps HDR auto
+exposure (indoors and outdoors separately, so the tonemapper doesn't brighten the scene
+straight back), sets fog and colour correction, and places lamps at points listed per
+map. Maps can have several looks ("variants"), picked per map or carried through a
+campaign. The config we ship covers the maps we run and was generated by our own tools,
+so a map not listed there stays as it is.
+
+Main cvars: `l4d_nightmode_enable`, `l4d_nightmode_variant` (force a look),
+`l4d_nightmode_arcs`, `l4d_nightmode_sight_fog`, `l4d_nightmode_lamps` and the
+`l4d_nightmode_lamp_*` limits, `l4d_nightmode_live_lock`. The source header lists every
+config key.
 
 ## Credits and license
 

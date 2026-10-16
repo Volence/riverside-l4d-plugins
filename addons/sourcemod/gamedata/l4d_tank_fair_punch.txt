@@ -1,0 +1,101 @@
+"Games"
+{
+	"left4dead"
+	{
+		"Functions"
+		{
+			"CTankClaw::DoSwing"
+			{
+				"signature"	"CTankClaw::DoSwing"
+				"callconv"	"thiscall"
+				"return"	"void"
+				"this"		"entity"
+			}
+			"CTankClaw::OnWindupFinished"
+			{
+				"signature"	"CTankClaw::OnWindupFinished"
+				"callconv"	"thiscall"
+				"return"	"void"
+				"this"		"entity"
+			}
+			"CTankClaw::SweepFist"
+			{
+				"signature"	"CTankClaw::SweepFist"
+				"callconv"	"thiscall"
+				"return"	"void"
+				"this"		"entity"
+				"arguments"
+				{
+					"from"
+					{
+						"type"	"vectorptr"
+					}
+					"to"
+					{
+						"type"	"vectorptr"
+					}
+				}
+			}
+			"CTankClaw::OnPlayerHit"
+			{
+				"signature"	"CTankClaw::OnPlayerHit"
+				"callconv"	"thiscall"
+				"return"	"void"
+				"this"		"entity"
+				"arguments"
+				{
+					"player"
+					{
+						"type"	"cbaseentity"
+					}
+					"flag"
+					{
+						"type"	"bool"
+					}
+				}
+			}
+		}
+		"Offsets"
+		{
+			// where DoSwing's sweep starts; OnWindupFinished seeds it with the scan target's
+			// centre, or eye + forward * tank_swing_range when the scan found no one
+			"CTankClaw::m_lastFistPos"
+			{
+				"linux"		"2212"
+			}
+		}
+		"Signatures"
+		{
+			// server.so 0x30bb12
+			"CTankClaw::DoSwing"
+			{
+				"library"	"server"
+				"linux"		"@_ZN9CTankClaw7DoSwingEv"
+			}
+			// server.so 0x30d9b0
+			"CTankClaw::OnWindupFinished"
+			{
+				"library"	"server"
+				"linux"		"@_ZN9CTankClaw16OnWindupFinishedEv"
+			}
+			// server.so 0x30acbe
+			"CTankClaw::SweepFist"
+			{
+				"library"	"server"
+				"linux"		"@_ZN9CTankClaw9SweepFistERK6VectorS2_"
+			}
+			// server.so 0x30a0fc
+			"CTankClaw::OnPlayerHit"
+			{
+				"library"	"server"
+				"linux"		"@_ZN9CTankClaw11OnPlayerHitEP13CTerrorPlayerb"
+			}
+			// server.so 0x398906
+			"CBaseAnimating::GetAttachment"
+			{
+				"library"	"server"
+				"linux"		"@_ZN14CBaseAnimating13GetAttachmentEPKcR6VectorR6QAngle"
+			}
+		}
+	}
+}

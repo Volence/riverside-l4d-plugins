@@ -1,0 +1,78 @@
+"Games"
+{
+	"left4dead"
+	{
+		"Functions"
+		{
+			"CTankClaw::OnWindupFinished"
+			{
+				"signature"	"CTankClaw::OnWindupFinished"
+				"callconv"	"thiscall"
+				"return"	"void"
+				"this"		"entity"
+			}
+			"CTankClaw::OnSwingEnd"
+			{
+				"signature"	"CTankClaw::OnSwingEnd"
+				"callconv"	"thiscall"
+				"return"	"void"
+				"this"		"entity"
+				"arguments"
+				{
+					"hitSomething"
+					{
+						"type"	"bool"
+					}
+				}
+			}
+			"CTankClaw::SweepFist"
+			{
+				"signature"	"CTankClaw::SweepFist"
+				"callconv"	"thiscall"
+				"return"	"void"
+				"this"		"entity"
+				"arguments"
+				{
+					"from"
+					{
+						"type"	"vectorptr"
+					}
+					"to"
+					{
+						"type"	"vectorptr"
+					}
+				}
+			}
+		}
+		"Offsets"
+		{
+			// int, written by CCSPlayer::OnWeaponFired and CTerrorPlayer::OnMeleeAttack, read only by
+			// CTerrorPlayer::WantsLagCompensationOnEntity (cmd->command_number - this <= 5 rewinds)
+			"CTerrorPlayer::m_iLastWeaponFireUsercmd"
+			{
+				"linux"		"6124"
+			}
+		}
+		"Signatures"
+		{
+			// server.so 0x30d9b0
+			"CTankClaw::OnWindupFinished"
+			{
+				"library"	"server"
+				"linux"		"@_ZN9CTankClaw16OnWindupFinishedEv"
+			}
+			// server.so 0x309e84
+			"CTankClaw::OnSwingEnd"
+			{
+				"library"	"server"
+				"linux"		"@_ZN9CTankClaw10OnSwingEndEb"
+			}
+			// server.so 0x30acbe
+			"CTankClaw::SweepFist"
+			{
+				"library"	"server"
+				"linux"		"@_ZN9CTankClaw9SweepFistERK6VectorS2_"
+			}
+		}
+	}
+}

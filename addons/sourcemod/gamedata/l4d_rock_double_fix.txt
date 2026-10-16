@@ -1,0 +1,55 @@
+"Games"
+{
+	"left4dead"
+	{
+		"Functions"
+		{
+			"RA_BounceTouch"
+			{
+				"signature"	"CTankRock::BounceTouch"
+				"callconv"	"thiscall"
+				"return"	"void"
+				"this"		"entity"
+				"arguments"
+				{
+					"other"
+					{
+						"type"	"cbaseentity"
+					}
+				}
+			}
+			"RA_ProximityThink"
+			{
+				"signature"	"CTankRock::ProximityThink"
+				"callconv"	"thiscall"
+				"return"	"void"
+				"this"		"entity"
+			}
+			"RA_Detonate"
+			{
+				"signature"	"CTankRock::Detonate"
+				"callconv"	"thiscall"
+				"return"	"void"
+				"this"		"entity"
+			}
+		}
+		"Signatures"
+		{
+			"CTankRock::BounceTouch"
+			{
+				"library"	"server"
+				"linux"		"@_ZN9CTankRock11BounceTouchEP11CBaseEntity"
+			}
+			"CTankRock::ProximityThink"
+			{
+				"library"	"server"
+				"linux"		"@_ZN9CTankRock14ProximityThinkEv"
+			}
+			"CTankRock::Detonate"
+			{
+				"library"	"server"
+				"linux"		"@_ZN9CTankRock8DetonateEv"
+			}
+		}
+	}
+}

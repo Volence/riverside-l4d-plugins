@@ -1,0 +1,33 @@
+"Games"
+{
+	"left4dead"
+	{
+		"Functions"
+		{
+			"CBaseCombatCharacter::GetFogObscuredRatio"
+			{
+				"signature"	"CBaseCombatCharacter::GetFogObscuredRatio"
+				"callconv"	"thiscall"
+				"return"	"float"
+				"this"		"entity"
+				"arguments"
+				{
+					"range"
+					{
+						"type"	"float"
+					}
+				}
+			}
+		}
+
+		"Signatures"
+		{
+			// server.so 0x3a61a0: IsHiddenByFog(range) is this >= 1.0; IsAbleToSee's fog test
+			"CBaseCombatCharacter::GetFogObscuredRatio"
+			{
+				"library"	"server"
+				"linux"		"@_ZNK20CBaseCombatCharacter19GetFogObscuredRatioEf"
+			}
+		}
+	}
+}
