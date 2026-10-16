@@ -29,27 +29,33 @@
 				"library"	"server"
 				"windows"	"\x56\x57\x68\x48\x01\x00\x00\x8B\xF1\xE8\x2A\x2A\x2A\x2A\x8B\xF8\x83\xC4\x04\x85\xFF\x74\x2A\x85\xF6\x74\x08\x8D"
 			}
-			// Linux only: what the vtable slots below must hold, checked at load
+			// what the vtable slots below must hold, checked at load (windows: unique signatures
+			// from server.dll md5 8f67a2ce94154cd2d7ca675ae4c5274f)
 			"ZombieBotLocomotion::Update"
 			{
 				"library"	"server"
 				"linux"		"@_ZN19ZombieBotLocomotion6UpdateEv"
+				"windows"	"\x83\xEC\x54\x55\x56\x6A\x04\x6A\x00\x68\x2A\x2A"
 			}
 			"ILocomotion::IsPotentiallyTraversable"
 			{
 				"library"	"server"
 				"linux"		"@_ZNK11ILocomotion24IsPotentiallyTraversableERK6VectorS2_NS_16TraverseWhenTypeEPf"
+				"windows"	"\x55\x8B\xEC\x83\xE4\xF0\x81\xEC\xE4\x00\x00\x00\x53\x56\x57\x6A\x04"
 			}
 			"ZombieBotLocomotion::ClimbUpToLedge"
 			{
 				"library"	"server"
 				"linux"		"@_ZN19ZombieBotLocomotion14ClimbUpToLedgeERK6VectorS2_PK11CBaseEntity"
+				"windows"	"\x55\x8B\xEC\x83\xE4\xF0\xA1\x2A\x2A\x2A\x2A\x81\xEC\xC4"
 			}
-			// the witch's INextBot (at +2224) points here; the thunk's name carries that offset
-			"Infected::IsAbleToClimbOnto thunk"
+			// what slot IsAbleToClimbOnto of a witch's INextBot holds: on linux a this-adjusting
+			// thunk (its name carries the offset, 2224); on windows the function itself
+			"Infected::IsAbleToClimbOnto (INextBot)"
 			{
 				"library"	"server"
 				"linux"		"@_ZThn2224_NK8Infected17IsAbleToClimbOntoEPK11CBaseEntity"
+				"windows"	"\x56\x8B\x74\x24\x08\x85\xF6\x57\x8B\xF9\x75\x07\x5F\x32\xC0\x5E\xC2\x04\x00\x8B\x06"
 			}
 		}
 		"Addresses"
@@ -94,10 +100,18 @@
 				{
 					"signature"	"ZombieBotLocomotion::Update"
 				}
+				"windows"
+				{
+					"signature"	"ZombieBotLocomotion::Update"
+				}
 			}
 			"ILocomotion::IsPotentiallyTraversable"
 			{
 				"linux"
+				{
+					"signature"	"ILocomotion::IsPotentiallyTraversable"
+				}
+				"windows"
 				{
 					"signature"	"ILocomotion::IsPotentiallyTraversable"
 				}
@@ -108,12 +122,20 @@
 				{
 					"signature"	"ZombieBotLocomotion::ClimbUpToLedge"
 				}
+				"windows"
+				{
+					"signature"	"ZombieBotLocomotion::ClimbUpToLedge"
+				}
 			}
-			"Infected::IsAbleToClimbOnto thunk"
+			"Infected::IsAbleToClimbOnto (INextBot)"
 			{
 				"linux"
 				{
-					"signature"	"Infected::IsAbleToClimbOnto thunk"
+					"signature"	"Infected::IsAbleToClimbOnto (INextBot)"
+				}
+				"windows"
+				{
+					"signature"	"Infected::IsAbleToClimbOnto (INextBot)"
 				}
 			}
 		}
@@ -138,15 +160,19 @@
 			"ILocomotion::ClimbUpToLedge"
 			{
 				"linux"		"42"
+				"windows"	"41"
 			}
-			// INextBot vtable slot, and where a witch keeps her INextBot (Linux only)
+			// INextBot vtable slot, and where a witch keeps her INextBot (windows: the
+			// constructors store the witch's INextBot vtable with mov [esi+0x89C], imm32)
 			"INextBot::IsAbleToClimbOnto"
 			{
 				"linux"		"52"
+				"windows"	"51"
 			}
 			"Witch::INextBot"
 			{
 				"linux"		"2224"
+				"windows"	"2204"
 			}
 		}
 	}

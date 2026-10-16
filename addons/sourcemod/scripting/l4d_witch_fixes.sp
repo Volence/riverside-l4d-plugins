@@ -4,7 +4,14 @@
  * witchfix/ in the Riverside workspace.
  *
  * Every fix checks its own hooks at load and turns only itself off if something does not match
- * (a game update moved a function, say), logging which one. Each has an on/off cvar that works live.
+ * (a game update moved a function, say), logging which one: each hooked vtable slot must hold the
+ * function the gamedata names (Linux: symbols; Windows: signatures from server.dll), and the climb
+ * fix also checks every witch's INextBot table. Each fix has an on/off cvar that works live.
+ *
+ * Linux / Windows layout (server.so / server.dll): WitchLocomotion Update 37 / 36,
+ * IsPotentiallyTraversable 83 / 82, ClimbUpToLedge 42 / 41; INextBot IsAbleToClimbOnto 52 / 51;
+ * the witch's INextBot at +2224 / +2204, her locomotion at +0xD8C / +0xD78. Windows has one
+ * destructor slot where Linux has two.
  *
  * corner  (l4d_witch_fixes_corner)
  *   ZombieBotLocomotion::ResolveCollision gives up on a move that would shift her less than 1 unit.
@@ -22,7 +29,7 @@
  *   yes for a line >= _direct_minlen long becomes no if the floor anywhere along it falls more than
  *   _direct_drop below both the line and the victim's height (traces every _direct_step units).
  *
- * climb   (l4d_witch_fixes_climb, Linux only for now)
+ * climb   (l4d_witch_fixes_climb)
  *   The path follower climbs whatever its path runs into, including physics props the nav mesh knows
  *   nothing about (Infected::IsAbleToClimbOnto says yes to any AI-walkable entity), and climb
  *   animations end on a ledge's front lip, which on a rounded top is too steep to stand on. Either
@@ -53,7 +60,7 @@ public Plugin myinfo =
 	name = "L4D Witch Fixes",
 	author = "Malevolence",
 	description = "Witch movement fixes: corners, straight-line cuts over gaps, failed climbs, map fire",
-	version = "1.0.0",
+	version = "1.1.0",
 	url = "https://github.com/Volence/riverside-l4d-plugins"
 };
 
@@ -199,10 +206,10 @@ bool InitShared(GameData gd)
 	return true;
 }
 
-// On Linux, check that a WitchLocomotion vtable slot holds the function the symbol names.
+// Check that a WitchLocomotion vtable slot holds the function the gamedata names (a symbol on
+// Linux, a signature on Windows).
 bool SlotIs(GameData gd, int slot, const char[] addrName)
 {
-	if (g_windows) return true; // no symbols; the offsets come from server.dll
 	Address want = gd.GetAddress(addrName);
 	return want != Address_Null && VtableSlot(g_witchVtable, slot) == want;
 }
@@ -347,15 +354,15 @@ public bool F_World(int ent, int mask) { return ent == 0 || ent > MaxClients; }
 
 bool InitClimb(GameData gd)
 {
-	if (g_windows) { LogMessage("climb fix OFF: Linux only for now (Windows offsets not worked out yet)"); return false; }
 	int slotUp = gd.GetOffset("ILocomotion::ClimbUpToLedge");
 	int slotOnto = gd.GetOffset("INextBot::IsAbleToClimbOnto");
 	g_botOffset = gd.GetOffset("Witch::INextBot");
 	if (slotUp < 0 || slotOnto < 0 || g_botOffset <= 0) { LogError("climb fix OFF: an offset is missing from the gamedata"); return false; }
 	if (!SlotIs(gd, slotUp, "ZombieBotLocomotion::ClimbUpToLedge")) { LogError("climb fix OFF: WitchLocomotion slot %d is not ZombieBotLocomotion::ClimbUpToLedge", slotUp); return false; }
-	// the INextBot vtable of a witch is checked per witch (HookWitch) against this thunk
-	if (gd.GetAddress("Infected::IsAbleToClimbOnto thunk") == Address_Null) { LogError("climb fix OFF: IsAbleToClimbOnto thunk not found"); return false; }
-	g_ontoThunk = gd.GetAddress("Infected::IsAbleToClimbOnto thunk");
+	// each witch's INextBot vtable is checked (HookWitch) against the function its slot must hold:
+	// the Linux this-adjusting thunk, or on Windows Infected::IsAbleToClimbOnto itself
+	g_ontoThunk = gd.GetAddress("Infected::IsAbleToClimbOnto (INextBot)");
+	if (g_ontoThunk == Address_Null) { LogError("climb fix OFF: Infected::IsAbleToClimbOnto not found"); return false; }
 	g_ontoSlot = slotOnto;
 	// bool IsAbleToClimbOnto(const CBaseEntity *object)
 	g_hOnto = new DynamicHook(slotOnto, HookType_Raw, ReturnType_Bool, ThisPointer_Address);

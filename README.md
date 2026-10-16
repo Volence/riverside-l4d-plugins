@@ -12,7 +12,7 @@ Each plugin ships as source (`addons/sourcemod/scripting`) and compiled
 
 | Plugin | Version | Needs | What it does |
 |---|---|---|---|
-| `l4d_witch_fixes` | 1.0.0 | DHooks, gamedata `l4d_witch_fixes.txt` (Linux + Windows; the climb fix is Linux only) | The witch's movement fixes in one plugin: she no longer freezes on corners at a low `nb_update_frequency`, no longer cuts straight at a survivor over a pit or open air, no longer climbs and slides off the same prop or rounded ledge forever, and map fire no longer steals her target. Replaces `l4d_witch_corner_fix`, `l4d_witch_direct_fix` and `l4d_witch_fire_fix`. See below. |
+| `l4d_witch_fixes` | 1.1.0 | DHooks, gamedata `l4d_witch_fixes.txt` (Linux + Windows) | The witch's movement fixes in one plugin: she no longer freezes on corners at a low `nb_update_frequency`, no longer cuts straight at a survivor over a pit or open air, no longer climbs and slides off the same prop or rounded ledge forever, and map fire no longer steals her target. Replaces `l4d_witch_corner_fix`, `l4d_witch_direct_fix` and `l4d_witch_fire_fix`. See below. |
 | `l4d_witch_unstuck` | 2.5.0 | left4dhooks, gamedata `l4d_witch_unstuck.txt` (Linux) | Fallback for a witch that makes no progress toward her target for 3 s: nudges her 8/16/24 units off the snag, then allows a short hop to a nearby nav spot (at most 120 units sideways, never when she is already within 120 units of her target). `!stuckwitch` logs a snapshot for admins. 2.5.0: never moves her off someone she is killing (a survivor who body-blocks her twice silently becomes her victim), and a witch set off by a smoker, lunging hunter or tank is tracked toward the survivor that player is moving, as the game does. |
 | `l4d_saferoom_lock` | 1.2 | left4dhooks | Holds the end saferoom door open and unusable while a tank or witch is still alive. |
 | `l4d_skypounce` | 0.4.0 | | Stops hunters chaining pounces off the sky brush ("ceiling pouncing"). Mode 1 is Zen's rule, mode 2 a last-surface-touched rule. |
@@ -179,7 +179,7 @@ look-ahead probes at ledge edges. On a test server, Death Toll 4 (survivor on th
 above the crater) went from 18 s to 6 s, and Blood Harvest 2 (the tilted train car) from
 17 s to 6 s.
 
-### Failed climbs (Linux only for now)
+### Failed climbs
 
 The path follower climbs whatever its path runs into. That includes physics props the nav
 mesh knows nothing about (`Infected::IsAbleToClimbOnto` says yes to any walkable entity that
@@ -211,8 +211,13 @@ unchanged.
 
 ### Windows
 
-The corner and direct fixes have Windows offsets taken from server.dll; they have not been
-run on a Windows server yet. The climb fix is Linux only and turns itself off on Windows.
+All four fixes run on Windows from 1.1.0. Every hooked vtable slot is checked at load against
+the function it must hold, found by a unique signature in server.dll (on Linux, by symbol), and
+the climb fix also checks each witch's INextBot table. Windows layout: WitchLocomotion slots
+Update 36, IsPotentiallyTraversable 82, ClimbUpToLedge 41; INextBot IsAbleToClimbOnto 51; the
+witch's INextBot at +2204 and her locomotion at +0xD78. All of that was verified against the
+current server.dll, but none of it has been run on a Windows server yet: if a check fails, that
+fix stays off and the log says which one, so please send us the log line.
 
 ## The hunter phantom shred fix
 
