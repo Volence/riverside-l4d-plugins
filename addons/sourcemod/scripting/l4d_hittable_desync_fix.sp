@@ -6,7 +6,7 @@
 #include <sdkhooks>
 #include <dhooks>
 
-#define PLUGIN_VERSION "1.0"
+#define PLUGIN_VERSION "1.1"
 
 // Stops hittables (cars, dumpsters, forklifts...) drawing away from where they really are.
 //
@@ -28,8 +28,20 @@
 // changed back at runtime: the client does not recheck its physics collision filter when a networked
 // group changes, and flipping it under a car already resting on ragdolls crashed a client once in
 // testing. So the cvar and a late load only affect props spawned afterwards.
+//
+// 1.1 (2026-10-16, server.so audit, l4d-source docs/annotated/hittables/):
+// - prop_physics_override is hooked too. CPhysicsProp::Spawn renames it to prop_physics only after
+//   OnEntityCreated, and Rotoblin's stripper turns the forklift, the militia rocks and c13m2's rock2
+//   into prop_physics_override, so those hittables were never moved and still desynced.
+// - Break pieces: CBreakableProp::Break gives each piece the parent's group (INTERACTIVE if the
+//   parent is NONE) before the piece spawns, so a piece of a moved hittable could come out in 19.
+//   Any such piece is put in INTERACTIVE, as in stock. Not seen on the No Mercy 2 pillars (rig
+//   2026-10-16: their pieces came out INTERACTIVE under 1.0 too), so it is a guard.
+// - m_hasTankGlow is only written inside CPhysicsProp::Spawn, so the next-frame recheck could never
+//   catch anything and is gone.
 
 #define GROUP_NONE			0
+#define GROUP_INTERACTIVE	4	// what the game gives a break piece of a NONE prop
 #define GROUP_HITTABLE		19	// COLLISION_GROUP_NPC_SCRIPTED
 
 ConVar g_cvEnable;
@@ -69,7 +81,7 @@ public void OnPluginStart()
 
 bool IsHittableClass(const char[] cls)
 {
-	return StrEqual(cls, "prop_physics") || StrEqual(cls, "prop_physics_multiplayer") || StrEqual(cls, "prop_car_alarm");
+	return StrEqual(cls, "prop_physics") || StrEqual(cls, "prop_physics_override") || StrEqual(cls, "prop_physics_multiplayer") || StrEqual(cls, "prop_car_alarm");
 }
 
 public void OnEntityCreated(int entity, const char[] classname)
@@ -85,17 +97,15 @@ public void OnEntityDestroyed(int entity)
 
 void OnSpawnPost(int entity)
 {
-	// set it before the prop is ever networked, so no client sees it in NONE first; props that
-	// get their tank glow flag after Spawn are caught a frame later
+	// a break piece inherited GROUP_HITTABLE from a hittable we moved: stock would give it INTERACTIVE
+	if (!g_bMoved[entity] && GetEntProp(entity, Prop_Send, "m_CollisionGroup") == GROUP_HITTABLE)
+	{
+		SDKCall(g_hSetGroup, entity, GROUP_INTERACTIVE);
+		return;
+	}
+	// set it before the prop is ever networked, so no client sees it in NONE first
 	if (!g_cvEnable.BoolValue) return;
 	Apply(entity);
-	if (!g_bMoved[entity]) RequestFrame(Frame_Apply, EntIndexToEntRef(entity));
-}
-
-void Frame_Apply(int ref)
-{
-	int entity = EntRefToEntIndex(ref);
-	if (entity != INVALID_ENT_REFERENCE && g_cvEnable.BoolValue) Apply(entity);
 }
 
 void Apply(int entity)

@@ -21,19 +21,19 @@ Each plugin ships as source (`addons/sourcemod/scripting`) and compiled
 | `l4d_tank_burn_cap` | 1.0 | | Caps total fire damage on the tank so a molotov chips it instead of killing it. |
 | `l4d_vote_lock` | 1.0 | | Makes `!load`, `!match`, `!mode`, `!changemap`, `!cm` and `!setscores` admin only. An admin override does nothing on commands registered with `RegConsoleCmd`, so this uses a command listener instead. |
 | `l4d_hunter_phantom_fix` | 0.2 | | Stops a hunter killed mid-pounce from carrying on shredding (sound and claw blood at the pin spot) on clients after it dies. See below. |
-| `l4d_tank_rules` | 1.3 | gamedata `l4d_tank_rules.txt` (Linux + Windows) | While a tank is alive: survivor distance points are frozen, and primary weapon swaps can be locked, limited to one per tank, or made to cost a full reload. See below. |
+| `l4d_tank_rules` | 1.3.1 | gamedata `l4d_tank_rules.txt` (Linux + Windows) | While a tank is alive: survivor distance points are frozen, and primary weapon swaps can be locked, limited to one per tank, or made to cost a full reload. See below. |
 | `l4d_ledge_fix` | 1.1 | left4dhooks, gamedata `l4d_ledge_fix.txt` | Blocks ledge hangs over drops that could not hurt (a survivor hanging off a rock a few units above the floor). See below. |
 | `l4d_fling_fall_fix` | 1.2 | | Stops survivors dying to "fell too far" from short drops after a tank punch: fall damage is taken from the speed gravity could give. See below. |
 | `l4d_ping` | 3.7 | | Overwatch-style team pings: one bound key marks whatever you aim at (infected, item, weapon or spot) for your own team only. See below. |
-| `l4d_tank_punch_lagcomp` | 1.0 | DHooks, gamedata `l4d_tank_punch_lagcomp.txt` | A human tank's punch is lag compensated whether M1 is tapped or held. Stock only rewinds survivors while attack is held, and the fist is tested 0.5 to 0.7 s after the click. See below. |
-| `l4d_tank_fair_punch` | 0.3.1 | DHooks, gamedata `l4d_tank_fair_punch.txt` | The windup-end target scan follows the fist: no free hit on a survivor the fist never came near, and a hit for one the fist visibly went through at the end of the windup. See below. |
+| `l4d_tank_punch_lagcomp` | 1.1 | DHooks, gamedata `l4d_tank_punch_lagcomp.txt` | A human tank's punch is lag compensated whether M1 is tapped or held. Stock only rewinds survivors while attack is held, and the fist is tested 0.5 to 0.7 s after the click. See below. |
+| `l4d_tank_fair_punch` | 0.4.0 | DHooks, gamedata `l4d_tank_fair_punch.txt` | The windup-end target scan follows the fist: no free hit on a survivor the fist never came near, and a hit for one the fist visibly went through at the end of the windup. See below. |
 | `l4d_rock_double_fix` | 1.0 | DHooks, gamedata `l4d_rock_double_fix.txt` | One tank rock can no longer hurt a survivor twice in the same tick. See below. |
 | `l4d_tongue_target` | 0.3 | DHooks, gamedata `l4d_tongue_target.txt` | When the smoker's crosshair is on several survivors, the nearest one gets the tongue (stock picks by client order), and survivors are judged where the smoker saw them. See below. |
 | `l4d_tank_pass_fix` | 0.1 | left4dhooks | A passed tank no longer bounces to a third player 3 s later. About one human pass in ten, the old tank's offer fires a second lottery at the handoff; an offer for a human tank within one lottery of the last is that duplicate and is blocked. Every offer is logged to `logs/tank_pass_fix.log` (`l4d_tank_pass_fix 0` logs only). |
-| `l4d_hittable_desync_fix` | 1.0 | DHooks, gamedata `l4d_hittable_desync_fix.txt` (Linux) | Cars and other hittables stay where the server has them on every client, not only on clients running low violence. See below. |
+| `l4d_hittable_desync_fix` | 1.1 | DHooks, gamedata `l4d_hittable_desync_fix.txt` (Linux) | Cars and other hittables stay where the server has them on every client, not only on clients running low violence. See below. |
 | `l4d_tank_reconnect` | 0.2 | left4dhooks (its `left4dhooks.l4d1.txt` gamedata) | A tank whose player drops gets the tank back on rejoin, with the same health, rage, rage grace timer, burning state and pass count, through the game's own bot handoff (`CTerrorPlayer::TakeOverZombieBot`). Works during a pause. |
 | `l4d_dead_bot_sweep` | 0.1-riverside1 | | Kicks dead infected bots that a pause kept alive, so they can't fill the infected team when the tank spawns (the tank bot was kicked for "infected team is full"). |
-| `l4d_nightmode` | 0.9-riverside1 | DHooks, gamedata `l4d_nightmode.txt`, `configs/l4d_nightmode.cfg` | Turns daytime maps into night at runtime, no BSP changes: lighting, exposure, fog, lamps and per-map looks from the config. See below. |
+| `l4d_nightmode` | 0.9-riverside2 | DHooks, gamedata `l4d_nightmode.txt`, `configs/l4d_nightmode.cfg` | Turns daytime maps into night at runtime, no BSP changes: lighting, exposure, fog, lamps and per-map looks from the config. See below. |
 
 ## Fixed forks of existing plugins
 

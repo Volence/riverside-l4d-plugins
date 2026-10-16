@@ -6,7 +6,7 @@
 #include <dhooks>
 #include <profiler>
 
-#define PLUGIN_VERSION "0.3.1"
+#define PLUGIN_VERSION "0.4.0"
 #define GAMEDATA "l4d_tank_fair_punch"
 
 #define TEAM_SURVIVOR	2
@@ -16,6 +16,8 @@
 #define SEQ_UPPERCUT	38
 #define SEQ_RIGHTHOOK	41
 #define SEQ_LEFTHOOK	43
+#define SEQ_POUND1		44	// ground pound (low attack at an incapped survivor)
+#define SEQ_POUND2		45
 
 #define HIST			256		// survivor position history, one entry per server frame
 #define MAXSAMP			160		// fist samples per windup (0.5 s at 100 tick is 50)
@@ -41,7 +43,8 @@
 // so damage, lag compensation and what a punch can hit stay the game's own:
 //   * VETO: the scan picked a standing survivor the fist never came within
 //     l4d_tank_fair_punch_veto_dist of during the windup: the sweep starts at the fist
-//     instead. The fist can still hit him in the 0.2 s window the normal way. A survivor
+//     instead. The fist can still hit him in the 0.2 s window the normal way (0.3.2 note: not
+//     on a left hook, whose sweeps still follow the trailing right hand). A survivor
 //     within l4d_tank_fair_punch_veto_min_gap of the tank (hugging it) is never vetoed:
 //     20 of the first 56 vetoes in the audit data were point blank, and dropping those
 //     would make hugging the tank a way not to get punched.
@@ -50,8 +53,8 @@
 //     front of the tank and in its line of sight: the sweep starts at his centre, exactly
 //     as the scan would have done.
 //
-// Distances use the tank player's view: the survivor's position rewound by the tank's
-// latency + lerp, which is what SweepFist's lag compensation tests against.
+// Distances use the tank player's view: the survivor's position rewound to the tick SweepFist's lag
+// compensation tests him at (ViewDelay, 0.4.0).
 //
 // 0.3: l4d_tank_fair_punch_log_all writes one PUNCH line per human punch and nearby
 // standing survivor, acted on or not, so any punch can be judged afterwards. The fist is
@@ -64,7 +67,29 @@
 // real window = 47 hits of 48; within 15 only past it = 14 misses of 29. Those late touches
 // now go to `post` (closest fist after the window, to 0.25 s) so they can be counted: the
 // arm visibly goes through a survivor after the game stopped testing it.
-
+//
+// 0.3.2 (2026-10-16, server.so audit, l4d-source docs/annotated/tank-punch/GroundPound.md): a non-punch
+// fire sequence clears a recording left over from a punch whose windup never finished, and an
+// incapped pick no longer blocks an add (see the add rule below).
+//
+// 0.4.0 (2026-10-16, owner calls after the audit):
+// - Ground pounds are judged too. GroundPound runs inside OnWindupFinished and ends the swing, but
+//   CTerrorWeapon::ItemPostFrame keeps calling DoSwing for tank_swing_duration from the scan's seed
+//   (m_lastFistPos), which can be a STANDING survivor next to the incapped one. The veto rule applies
+//   to that seed; ground pounds never add. The pound's own hits on incapped survivors are untouched.
+// - l4d_tank_fair_punch_pick_seed: when the scan picked a standing survivor and nothing vetoed it,
+//   the stock seed is his PRESENT centre while SweepFist tests his rewound box (every human punch is
+//   rewound since l4d_tank_punch_lagcomp), so at ~150 ms and running speed the two are ~30 units apart
+//   and the scan's free hit can miss. 1 logs that gap (seed_gap on the PUNCH line), 2 starts the sweep
+//   at his rewound centre instead.
+// - The tank's view is now the game's own rewind (CLagCompensationManager::StartLagCompensation): the
+//   usercmd's tick_count minus the lerp in ticks, falling back to latency + lerp when they differ by
+//   more than 0.2 s, capped by sv_maxunlag, none at all with cl_lagcompensation 0. 0.3 used latency +
+//   lerp against the tickbase clock. Survivor history is keyed by simulation time, as the game's records are.
+ConVar g_hCvarPickSeed, g_hCvarMaxUnlag;
+int g_iCmdTick[MAXPLAYERS + 1];		// tick_count of the usercmd being run
+float g_fActSeedGap[MAXPLAYERS + 1];
+bool g_bActReseed[MAXPLAYERS + 1];
 ConVar g_hCvarMode, g_hCvarVetoDist, g_hCvarVetoGap, g_hCvarAddTime, g_hCvarLog, g_hCvarLogAll, g_hCvarFistRadius, g_hCvarSwingDur;
 Handle g_hGetAttachment;
 char g_sLogPath[PLATFORM_MAX_PATH];
@@ -162,6 +187,8 @@ public void OnPluginStart()
 	g_hCvarAddTime = CreateConVar("l4d_tank_fair_punch_add_time", "0.25", "Seconds before the windup ends in which a fist that touched a survivor (within tank_fist_radius) makes him the punch target. 0 = never add.", FCVAR_NOTIFY, true, 0.0, true, 0.5);
 	g_hCvarLog = CreateConVar("l4d_tank_fair_punch_log", "1", "Log every veto and add to logs/tank_fair_punch.log.", FCVAR_NONE, true, 0.0, true, 1.0);
 	g_hCvarLogAll = CreateConVar("l4d_tank_fair_punch_log_all", "1", "Also log a PUNCH line for every tank punch and each standing survivor within 250 units, acted on or not. 1 = human tanks, 2 = bot tanks too (test rigs).", FCVAR_NONE, true, 0.0, true, 2.0);
+	g_hCvarPickSeed = CreateConVar("l4d_tank_fair_punch_pick_seed", "1", "When the scan's pick is kept: 0 = stock seed (his present centre). 1 = stock, log the gap to his rewound centre (seed_gap). 2 = seed at his rewound centre, where the sweep tests him.", FCVAR_NOTIFY, true, 0.0, true, 2.0);
+	g_hCvarMaxUnlag = FindConVar("sv_maxunlag");
 	g_hCvarFistRadius = FindConVar("tank_fist_radius");
 	g_hCvarSwingDur = FindConVar("tank_swing_duration");
 
@@ -204,7 +231,24 @@ void ResetClient(int client)
 
 bool IsPunch(int seq)
 {
-	return seq == SEQ_UPPERCUT || seq == SEQ_RIGHTHOOK || seq == SEQ_LEFTHOOK;
+	return seq == SEQ_UPPERCUT || seq == SEQ_RIGHTHOOK || seq == SEQ_LEFTHOOK || IsPound(seq);
+}
+
+bool IsPound(int seq)
+{
+	return seq == SEQ_POUND1 || seq == SEQ_POUND2;
+}
+
+// server frame clock (OnGameFrame's GetGameTime); inside a usercmd GetGameTime is the tickbase clock
+float FrameTime()
+{
+	return GetGameTickCount() * GetTickInterval();
+}
+
+public Action OnPlayerRunCmd(int client, int &buttons, int &impulse, float vel[3], float angles[3], int &weapon, int &subtype, int &cmdnum, int &tickcount, int &seed, int mouse[2])
+{
+	g_iCmdTick[client] = tickcount;
+	return Plugin_Continue;
 }
 
 bool IsStanding(int client)
@@ -212,12 +256,26 @@ bool IsStanding(int client)
 	return !GetEntProp(client, Prop_Send, "m_isIncapacitated") && !GetEntProp(client, Prop_Send, "m_isHangingFromLedge");
 }
 
+// How far back (seconds, on the frame clock) SweepFist's lag compensation puts survivors for this
+// tank's current usercmd, as StartLagCompensation picks its target tick. 0 = not rewound.
 float ViewDelay(int client)
 {
 	if( IsFakeClient(client) ) return 0.0;
-	float d = GetClientLatency(client, NetFlow_Outgoing) + GetEntPropFloat(client, Prop_Data, "m_fLerpTime");
+	char lc[4];
+	if( GetClientInfo(client, "cl_lagcompensation", lc, sizeof(lc)) && lc[0] == '0' ) return 0.0;
+	float interval = GetTickInterval();
+	float lerp = GetEntPropFloat(client, Prop_Data, "m_fLerpTime");
+	int lerpTicks = RoundToFloor(0.5 + lerp / interval);
+	float correct = GetClientLatency(client, NetFlow_Outgoing) + lerpTicks * interval;
+	float maxUnlag = g_hCvarMaxUnlag != null ? g_hCvarMaxUnlag.FloatValue : 1.0;
+	if( correct < 0.0 ) correct = 0.0;
+	if( correct > maxUnlag ) correct = maxUnlag;
+	int target = g_iCmdTick[client] - lerpTicks;
+	// gpGlobals->tickcount, not curtime: inside a usercmd curtime is the tickbase clock
+	float delta = correct - interval * (GetGameTickCount() - target);
+	if( FloatAbs(delta) > 0.2 ) target = GetGameTickCount() - RoundToFloor(0.5 + correct / interval);
+	float d = FrameTime() - target * interval;
 	if( d < 0.0 ) d = 0.0;
-	if( d > 1.0 ) d = 1.0;
 	return d;
 }
 
@@ -240,7 +298,10 @@ void RecordSurvivor(int client, float now)
 	float pos[3], maxs[3];
 	GetClientAbsOrigin(client, pos);
 	GetClientMaxs(client, maxs);
-	g_fHT[client][h] = now;
+	// keyed like the lag compensation records: by the survivor's own simulation time (his tickbase
+	// clock, up to sv_clockcorrection_msecs off the frame clock). Rig 2026-10-16: frame-keyed history
+	// put the rewound survivor ~0.07 s off; simulation-time keyed matched the game to 0.0 units.
+	g_fHT[client][h] = GetEntPropFloat(client, Prop_Data, "m_flSimulationTime");
 	g_fHP[client][h] = pos;
 	g_fHTop[client][h] = maxs[2];
 	g_iHHead[client] = h;
@@ -276,6 +337,14 @@ void TankFrame(int tank, float now)
 	if( GetEntProp(tank, Prop_Send, "m_zombieClass") != ZC_TANK ) return;
 	int seq = GetEntProp(tank, Prop_Send, "m_fireLayerSequence");
 	float start = GetEntPropFloat(tank, Prop_Send, "m_fireLayerStartTime");
+	// 0.3.2: any other new fire sequence (ground pound 44/45, rock throw) ends a recording whose
+	// windup never finished, so a later sweep is not judged on that punch's old fist samples
+	if( !IsPunch(seq) && start != g_fLastStart[tank] && start > 0.0 )
+	{
+		g_fLastStart[tank] = start;
+		g_bRec[tank] = false;
+		g_bWantSeed[tank] = false;
+	}
 	if( IsPunch(seq) && start != g_fLastStart[tank] && start > 0.0 )
 	{
 		g_fLastStart[tank] = start;
@@ -396,7 +465,8 @@ MRESReturn Decide(int tank, int mode, DHookParam hParams)
 	float from[3], to[3];
 	hParams.GetVector(1, from);
 	hParams.GetVector(2, to);
-	float now = GetGameTime();
+	float now = FrameTime();
+	bool pound = IsPound(g_iRecSeq[tank]);
 	float tdelay = ViewDelay(tank);
 	float radius = g_hCvarFistRadius != null ? g_hCvarFistRadius.FloatValue : 15.0;
 	float vetoDist = g_hCvarVetoDist.FloatValue;
@@ -487,8 +557,27 @@ MRESReturn Decide(int tank, int mode, DHookParam hParams)
 	bool far = picked && pickedMin >= 0.0 && vetoDist > 0.0 && pickedMin >= vetoDist;
 	bool hug = far && pickedGap < g_hCvarVetoGap.FloatValue;
 	bool veto = far && !hug;
-	// a punch the scan already aimed at someone the fist reached (or who hugs the tank) keeps that target
-	if( picked && !veto ) add = 0;
+	// a punch the scan already aimed at someone the fist reached (or who hugs the tank) keeps that
+	// target. 0.3.2: only a standing pick: an incapped one can never be vetoed (pickedMin stays -1)
+	// and a normal swing does him no damage, so it used to cancel the add of a standing survivor
+	// the fist went through
+	if( picked && !veto && IsStanding(picked) ) add = 0;
+	// a ground pound is only ever narrowed, never pointed at someone new
+	if( pound ) add = 0;
+	// a kept standing pick: where the sweep will test him (rewound) vs the stock seed (present centre)
+	float seedGap = -1.0, pickSeed[3];
+	if( picked && !veto && IsStanding(picked) && g_hCvarPickSeed.IntValue >= 1 )
+	{
+		float po[3], ptop;
+		if( SurvivorAt(picked, now - tdelay, po, ptop) )
+		{
+			pickSeed = po;
+			pickSeed[2] += ptop * 0.5;
+			seedGap = GetVectorDistance(pickSeed, from);
+		}
+	}
+	// a ground pound is only ever narrowed, so its seed is never moved onto the survivor
+	bool reseed = seedGap > 1.0 && g_hCvarPickSeed.IntValue >= 2 && !pound;
 	bool human = !IsFakeClient(tank);
 	if( human )
 	{
@@ -514,7 +603,7 @@ MRESReturn Decide(int tank, int mode, DHookParam hParams)
 	g_bPost[tank] = true;
 	g_fPostUntil[tank] = now + 0.25;
 
-	bool action = veto || add || hug;
+	bool action = veto || add || hug || reseed;
 	bool punchLog = g_hCvarLog.BoolValue && (human ? g_hCvarLogAll.IntValue >= 1 : g_hCvarLogAll.IntValue >= 2);
 	if( !action && !punchLog ) return MRES_Ignored;
 
@@ -538,11 +627,14 @@ MRESReturn Decide(int tank, int mode, DHookParam hParams)
 		g_fActDelay[tank] = tdelay;
 		g_iActMode[tank] = mode;
 		g_iActSeq[tank] = g_iRecSeq[tank];
+		g_fActSeedGap[tank] = seedGap;
+		g_bActReseed[tank] = reseed;
 		CreateTimer(0.35, T_Outcome, GetClientUserId(tank), TIMER_FLAG_NO_MAPCHANGE);
 	}
-	if( mode < 2 || (!veto && !add) ) return MRES_Ignored;
+	if( mode < 2 || (!veto && !add && !reseed) ) return MRES_Ignored;
 
-	if( add ) hParams.SetVector(1, addSeed);
+	if( reseed ) hParams.SetVector(1, pickSeed);
+	else if( add ) hParams.SetVector(1, addSeed);
 	else hParams.SetVector(1, to);
 	return MRES_ChangedHandled;
 }
@@ -554,7 +646,7 @@ MRESReturn Detour_OnPlayerHit(int claw, DHookParam hParams)
 	int victim = hParams.Get(1);
 	if( victim >= 1 && victim <= MaxClients )
 	{
-		if( !g_bHitBy[tank][victim] ) g_fHitT[tank][victim] = GetGameTime();
+		if( !g_bHitBy[tank][victim] ) g_fHitT[tank][victim] = FrameTime();
 		g_bHitBy[tank][victim] = true;
 	}
 	return MRES_Ignored;
@@ -585,11 +677,12 @@ Action T_Outcome(Handle timer, int userid)
 	if( !g_bActLine[tank] ) return Plugin_Stop;
 	// veto_hit = the vetoed survivor was hit anyway (by the fist in the window, or by stock in log mode).
 	// hug = the fist never came near the scan's pick but he was within veto_min_gap of the tank, so he kept the hit.
-	LogToFileEx(g_sLogPath, "%s map=%s tank=\"%s\"%s seq=%d tdelay=%.3f veto=\"%s\" veto_min=%.1f veto_hit=%d gap=%.1f hug=\"%s\" add=\"%s\" add_min=%.1f add_hit=%d hits=\"%s\"",
+	LogToFileEx(g_sLogPath, "%s map=%s tank=\"%s\"%s seq=%d tdelay=%.3f veto=\"%s\" veto_min=%.1f veto_hit=%d gap=%.1f hug=\"%s\" add=\"%s\" add_min=%.1f add_hit=%d reseed=%d seed_gap=%.1f hits=\"%s\"",
 		g_iActMode[tank] >= 2 ? "APPLIED" : "WOULD", map, tname, IsFakeClient(tank) ? " bot=1" : "", g_iActSeq[tank], g_fActDelay[tank],
 		vname, (veto || hug) ? g_fActVetoMin[tank] : -1.0, veto ? view_as<int>(g_bHitBy[tank][veto]) : -1,
 		g_fActGap[tank], hname,
-		aname, add ? g_fActAddMin[tank] : -1.0, add ? view_as<int>(g_bHitBy[tank][add]) : -1, hits);
+		aname, add ? g_fActAddMin[tank] : -1.0, add ? view_as<int>(g_bHitBy[tank][add]) : -1,
+		view_as<int>(g_bActReseed[tank]), g_fActSeedGap[tank], hits);
 	return Plugin_Stop;
 }
 
@@ -615,6 +708,7 @@ void LogPunch(int tank, const char[] map, const char[] tname)
 	if( g_iActVeto[tank] ) strcopy(act, sizeof(act), "veto");
 	else if( g_iActAdd[tank] ) strcopy(act, sizeof(act), "add");
 	else if( g_iActHug[tank] ) strcopy(act, sizeof(act), "hug");
+	else if( g_bActReseed[tank] ) strcopy(act, sizeof(act), "reseed");
 	else strcopy(act, sizeof(act), "none");
 	for( int s = 1; s <= MaxClients; s++ )
 	{
@@ -637,10 +731,10 @@ void LogPunch(int tank, const char[] map, const char[] tname)
 		char sname[MAX_NAME_LENGTH];
 		GetClientName(s, sname, sizeof(sname));
 		bool hit = g_bHitBy[tank][s];
-		LogToFileEx(g_sLogPath, "PUNCH id=%d map=%s tank=\"%s\" seq=%d tdelay=%.3f surv=\"%s\" picked=%d pick=\"%s\" act=%s wind=%.1f late=%.1f window=%.1f post=%.1f gap=%.1f hit=%d hit_dt=%.3f hit_d=%.1f",
+		LogToFileEx(g_sLogPath, "PUNCH id=%d map=%s tank=\"%s\" seq=%d tdelay=%.3f surv=\"%s\" picked=%d pick=\"%s\" act=%s wind=%.1f late=%.1f window=%.1f post=%.1f gap=%.1f hit=%d hit_dt=%.3f hit_d=%.1f seed_gap=%.1f",
 			g_iPunchNo[tank], map, tname, g_iActSeq[tank], tdelay, sname, s == pick, pname, act,
 			g_fNearWind[tank][s], g_fNearLate[tank][s] > 9999.0 ? -1.0 : g_fNearLate[tank][s], window, post, g_fNearGap[tank][s],
-			hit, hit ? hitT - g_fWindEnd[tank] : -1.0, hitD);
+			hit, hit ? hitT - g_fWindEnd[tank] : -1.0, hitD, s == pick ? g_fActSeedGap[tank] : -1.0);
 	}
 }
 

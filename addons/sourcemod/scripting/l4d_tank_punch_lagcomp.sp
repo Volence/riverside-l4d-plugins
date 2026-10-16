@@ -5,7 +5,7 @@
 #include <sdktools>
 #include <dhooks>
 
-#define PLUGIN_VERSION "1.0"
+#define PLUGIN_VERSION "1.1"
 #define GAMEDATA "l4d_tank_punch_lagcomp"
 
 #define TEAM_INFECTED	3
@@ -31,6 +31,14 @@
 // which also run in the tank's usercmd, keep stock behaviour. Bot tanks are never lag
 // compensated by the game (separate bot check) and are left alone.
 //
+// 1.1 (2026-10-16, server.so audit, l4d-source docs/annotated/tank-punch/GroundPound.md): a ground
+// pound (punch at an incapped survivor) calls OnSwingEnd from inside OnWindupFinished, before any
+// sweep, yet CTerrorWeapon::ItemPostFrame keeps calling DoSwing on m_swingTimer alone for the rest
+// of tank_swing_duration, and those sweeps can still hit standing survivors. The cancel branch in
+// ItemPostFrame (0x320f93) ends the swing early the same way. 1.0 closed the window there, so those
+// sweeps were not rewound on a tap. Now an OnSwingEnd that comes while m_swingTimer still runs only
+// schedules the close for just after the timer ends.
+//
 // l4d_tank_punch_lagcomp_debug 1 writes logs/tank_punch_lagcomp.log: one PUNCH line per human
 // punch with its sweeps, how many ran with the gate open by this plugin, and how many already
 // had attack held (stock would have rewound those anyway).
@@ -43,6 +51,8 @@ int g_iCmdNum[MAXPLAYERS + 1];		// command_number of the usercmd being run (OnPl
 int g_iCmdButtons[MAXPLAYERS + 1];	// its buttons, for the debug "held" count
 bool g_bInSwing[MAXPLAYERS + 1];	// windup finished, swing not ended: the gate is held open
 int g_iSavedFire[MAXPLAYERS + 1];	// m_iLastWeaponFireUsercmd before the window, restored after
+float g_fCloseAt[MAXPLAYERS + 1];	// OnSwingEnd came while m_swingTimer still ran: close at this game time
+int g_iOffSwingEnd;					// CTankClaw m_swingTimer.m_timestamp (CountdownTimer +8)
 
 // debug counts for the punch in progress
 int g_iSweeps[MAXPLAYERS + 1], g_iSweepsOpen[MAXPLAYERS + 1], g_iSweepsHeld[MAXPLAYERS + 1];
@@ -84,6 +94,10 @@ public void OnPluginStart()
 	if( dsf == null || !dsf.Enable(Hook_Pre, Detour_SweepFist) ) SetFailState("Failed to detour CTankClaw::SweepFist");
 	delete gd;
 
+	int off = FindSendPropInfo("CTankClaw", "m_swingTimer");
+	if( off <= 0 ) SetFailState("Missing netprop CTankClaw::m_swingTimer");
+	g_iOffSwingEnd = off + 8;
+
 	CreateConVar("l4d_tank_punch_lagcomp_version", PLUGIN_VERSION, "Tank Punch Lag Compensation version", FCVAR_NOTIFY|FCVAR_DONTRECORD);
 	g_cvEnable = CreateConVar("l4d_tank_punch_lagcomp_enable", "1", "1 = a human tank's punch is lag compensated whether attack is held or tapped. 0 = stock (only while attack is held).", FCVAR_NOTIFY, true, 0.0, true, 1.0);
 	g_cvDebug = CreateConVar("l4d_tank_punch_lagcomp_debug", "0", "1 = log a PUNCH line per human punch to logs/tank_punch_lagcomp.log.", FCVAR_NONE, true, 0.0, true, 1.0);
@@ -120,6 +134,7 @@ void Event_PlayerGone(Event event, const char[] name, bool dontBroadcast)
 // Close the window: put back the field's value from before the punch.
 void EndWindow(int client)
 {
+	g_fCloseAt[client] = 0.0;
 	if( !g_bInSwing[client] ) return;
 	g_bInSwing[client] = false;
 	if( IsClientInGame(client) ) SetEntData(client, g_iOffLastFire, g_iSavedFire[client], 4);
@@ -150,6 +165,7 @@ public Action OnPlayerRunCmd(int client, int &buttons, int &impulse, float vel[3
 	if( g_bInSwing[client] )
 	{
 		if( !IsPlayerAlive(client) || GetClientTeam(client) != TEAM_INFECTED || !HoldsClaw(client) ) EndWindow(client);
+		else if( g_fCloseAt[client] > 0.0 && GetGameTime() > g_fCloseAt[client] ) FinishPunch(client);
 		else SetEntData(client, g_iOffLastFire, cmdnum, 4);
 	}
 	return Plugin_Continue;
@@ -163,6 +179,7 @@ MRESReturn Detour_OnWindupFinished(int claw)
 	if( tank == 0 || IsFakeClient(tank) ) return MRES_Ignored;
 	if( !g_bInSwing[tank] ) g_iSavedFire[tank] = GetEntData(tank, g_iOffLastFire, 4);
 	g_bInSwing[tank] = true;
+	g_fCloseAt[tank] = 0.0;
 	SetEntData(tank, g_iOffLastFire, g_iCmdNum[tank], 4);
 	g_iSweeps[tank] = 0;
 	g_iSweepsOpen[tank] = 0;
@@ -180,11 +197,25 @@ MRESReturn Detour_SweepFist(int claw, DHookParam hParams)
 	return MRES_Ignored;
 }
 
-// Runs after the swing's last sweep (also from holster, stun and the like).
+// Runs after the swing's last sweep (also from holster, stun and the like). A ground pound and the
+// ItemPostFrame cancel branch call it while m_swingTimer still runs and DoSwing keeps sweeping, so
+// then the window stays open until just after the timer ends.
 MRESReturn Detour_OnSwingEnd(int claw, DHookParam hParams)
 {
 	int tank = OwnerTank(claw);
 	if( tank == 0 || !g_bInSwing[tank] ) return MRES_Ignored;
+	float until = GetEntDataFloat(claw, g_iOffSwingEnd);
+	if( GetGameTime() < until )
+	{
+		g_fCloseAt[tank] = until + 0.05;
+		return MRES_Ignored;
+	}
+	FinishPunch(tank);
+	return MRES_Ignored;
+}
+
+void FinishPunch(int tank)
+{
 	EndWindow(tank);
 	g_iStatPunches++;
 	g_iStatSweeps += g_iSweeps[tank];
@@ -197,7 +228,6 @@ MRESReturn Detour_OnSwingEnd(int claw, DHookParam hParams)
 		LogToFileEx(g_sLog, "PUNCH map=%s tank=\"%N\" sweeps=%d in_window=%d held=%d",
 			map, tank, g_iSweeps[tank], g_iSweepsOpen[tank], g_iSweepsHeld[tank]);
 	}
-	return MRES_Ignored;
 }
 
 Action Cmd_Stats(int client, int args)

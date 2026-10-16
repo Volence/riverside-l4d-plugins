@@ -149,7 +149,7 @@
 #pragma newdecls required
 #pragma dynamic 65536   // lamp_spots and stinger lists are parsed on the stack
 
-#define PLUGIN_VERSION "0.9-riverside1"
+#define PLUGIN_VERSION "0.9-riverside2"
 #define GAMEDATA_FILE  "l4d_nightmode"
 #define CONFIG_FILE    "configs/l4d_nightmode.cfg"
 
@@ -211,7 +211,7 @@ float g_fFogStart, g_fFogEnd, g_fFogDensity;
 int g_iFogOrigRef[2048];
 bool g_bFogOrigOn[2048];
 float g_fFogOrigStart[2048], g_fFogOrigEnd[2048], g_fFogOrigDensity[2048];
-int g_iFogMaster = INVALID_ENT_REFERENCE;   // the first captured controller: sight for non-players
+int g_iFogMaster = INVALID_ENT_REFERENCE;   // the controller the game judges sight by (CFogSystem master)
 ConVar g_cvSightFog;
 StringMap g_hSwap;
 int g_iSwapped;
@@ -5020,6 +5020,13 @@ void SpawnBulbGlow(const float lamp[8])
 // Midnight's near-black fog_end 1200 drained rage ~30 m out on maps that look clear
 // (No Mercy 3, 2026-10-15). The detour answers with the controller's captured Valve
 // values instead, unless the look is a storm or fog, whose fog is meant to blind.
+// riverside2 (2026-10-16, server.so audit, l4d-source docs/annotated/fog/): the game judges every
+// viewer by the CFogSystem master controller (first env_fog_controller, replaced by any later one
+// with spawnflag 1), never by the player's own m_PlayerFog.m_hCtrl, which fog_volume brushes move
+// and which only drives what the client draws. riverside1 used the player's controller, so a tank
+// inside a fog_volume (Mercy 5 / Dead Air 2 interiors, the Blood Harvest 5 cornfield) lost sight
+// sooner than stock, and on airport02/04, farm01/02 and hospital01 the first controller is not the
+// master, so commons and the witch read the wrong one too.
 void SetupSightFog()
 {
 	GameData conf = new GameData(GAMEDATA_FILE);
@@ -5044,7 +5051,8 @@ void CaptureFog(int ent)
 	g_fFogOrigStart[ent] = GetEntPropFloat(ent, Prop_Send, "m_fog.start");
 	g_fFogOrigEnd[ent] = GetEntPropFloat(ent, Prop_Send, "m_fog.end");
 	g_fFogOrigDensity[ent] = GetEntPropFloat(ent, Prop_Send, "m_fog.maxdensity");
-	if (EntRefToEntIndex(g_iFogMaster) == INVALID_ENT_REFERENCE)
+	// ApplyFog walks the controllers in entity order, as CFogSystem does
+	if (EntRefToEntIndex(g_iFogMaster) == INVALID_ENT_REFERENCE || (GetEntProp(ent, Prop_Data, "m_spawnflags") & 1))
 		g_iFogMaster = ref;
 }
 
@@ -5061,11 +5069,7 @@ public MRESReturn Detour_FogRatio(int pThis, DHookReturn hReturn, DHookParam hPa
 {
 	if (!g_cvSightFog.BoolValue || LookBlindsSight())
 		return MRES_Ignored;
-	int ctrl = -1;
-	if (pThis >= 1 && pThis <= MaxClients)
-		ctrl = GetEntPropEnt(pThis, Prop_Send, "m_PlayerFog.m_hCtrl");
-	if (ctrl <= MaxClients)
-		ctrl = EntRefToEntIndex(g_iFogMaster);
+	int ctrl = EntRefToEntIndex(g_iFogMaster);
 	if (ctrl <= MaxClients || ctrl >= sizeof(g_iFogOrigRef) || g_iFogOrigRef[ctrl] != EntIndexToEntRef(ctrl))
 		return MRES_Ignored;   // never captured (no look fog on it, or a reload mid-map): leave it alone
 

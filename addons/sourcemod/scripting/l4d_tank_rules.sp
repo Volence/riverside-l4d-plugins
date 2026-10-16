@@ -5,7 +5,7 @@
 #include <sdktools>
 #include <sdkhooks>
 
-#define PLUGIN_VERSION "1.3"
+#define PLUGIN_VERSION "1.3.1"
 
 #define TEAM_SURVIVOR		2
 #define TEAM_INFECTED		3
@@ -268,6 +268,9 @@ void ResetTankState()
 	for( int i = 0; i <= MaxClients; i++ )
 	{
 		g_sPendingSwap[i][0] = '\0';
+		// 1.3.1: a mode 3 pickup another plugin refused left this set, and it emptied a later
+		// same-class equip during the next tank
+		g_sPendingEmpty[i][0] = '\0';
 		// Game time restarts with the map, so an old stamp could mute hints.
 		g_fLastHint[i] = 0.0;
 	}
