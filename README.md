@@ -12,7 +12,7 @@ Each plugin ships as source (`addons/sourcemod/scripting`) and compiled
 
 | Plugin | Version | Needs | What it does |
 |---|---|---|---|
-| `l4d_witch_fixes` | 1.1.0 | DHooks, gamedata `l4d_witch_fixes.txt` (Linux + Windows) | The witch's movement fixes in one plugin: she no longer freezes on corners at a low `nb_update_frequency`, no longer cuts straight at a survivor over a pit or open air, no longer climbs and slides off the same prop or rounded ledge forever, and map fire no longer steals her target. Replaces `l4d_witch_corner_fix`, `l4d_witch_direct_fix` and `l4d_witch_fire_fix`. See below. |
+| `l4d_witch_fixes` | 1.1.1 | DHooks, gamedata `l4d_witch_fixes.txt` (Linux + Windows) | The witch's movement fixes in one plugin: she no longer freezes on corners at a low `nb_update_frequency`, no longer cuts straight at a survivor over a pit or open air, no longer climbs and slides off the same prop or rounded ledge forever, and map fire no longer steals her target. Replaces `l4d_witch_corner_fix`, `l4d_witch_direct_fix` and `l4d_witch_fire_fix`. See below. |
 | `l4d_witch_unstuck` | 2.5.0 | left4dhooks, gamedata `l4d_witch_unstuck.txt` (Linux) | Fallback for a witch that makes no progress toward her target for 3 s: nudges her 8/16/24 units off the snag, then allows a short hop to a nearby nav spot (at most 120 units sideways, never when she is already within 120 units of her target). `!stuckwitch` logs a snapshot for admins. 2.5.0: never moves her off someone she is killing (a survivor who body-blocks her twice silently becomes her victim), and a witch set off by a smoker, lunging hunter or tank is tracked toward the survivor that player is moving, as the game does. |
 | `l4d_saferoom_lock` | 1.2 | left4dhooks | Holds the end saferoom door open and unusable while a tank or witch is still alive. |
 | `l4d_skypounce` | 0.4.0 | | Stops hunters chaining pounces off the sky brush ("ceiling pouncing"). Mode 1 is Zen's rule, mode 2 a last-surface-touched rule. |
@@ -218,6 +218,11 @@ Update 36, IsPotentiallyTraversable 82, ClimbUpToLedge 41; INextBot IsAbleToClim
 witch's INextBot at +2204 and her locomotion at +0xD78. All of that was verified against the
 current server.dll, but none of it has been run on a Windows server yet: if a check fails, that
 fix stays off and the log says which one, so please send us the log line.
+
+1.1.1: with two or more witches alive, 1.1.0 logged "INextBot slot 51 is not
+Infected::IsAbleToClimbOnto" for every witch after the first and left her without the climb fix
+(the first witch's hook puts a DHooks trampoline in the shared slot). Thanks to Harry for the
+report; it happened on Linux too (slot 52). 1.1.1 checks the table once and hooks every witch.
 
 ## The hunter phantom shred fix
 
