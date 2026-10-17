@@ -53,7 +53,7 @@ Rotoblin already ships (`Roto2-AZ_mod.phrases`), and build against the Rotoblin-
 | `l4d_fix_common_shove` | 1.4.1-riverside2 | Forgetest's common shove fix, with the L4D1 falling activity, and a common is only skipped while it is falling AND off the ground (a grounded common stuck in the fall activity no longer stays frozen). |
 | `l4d_versus_rescue_door_fix` | 1.0-riverside2 | The rescue door unlock is written to the networked `m_bLocked`, so clients see it. |
 | `checkpoint-rage-control` | riverside2 | The "tank still loses rage" notice hooks the event the game really fires (`player_entered_checkpoint`) and checks the tank class (5 on L4D1). |
-| `l4d_QuadCaps` | 1.5-riverside3 | The temporary boomer ban only covers its own window (no more `z_versus_boomer_limit 0` left behind by an early boomer death or a mid-map limit change). |
+| `l4d_QuadCaps` | 1.5-riverside4 | The temporary boomer ban only covers its own window (no more `z_versus_boomer_limit 0` left behind by an early boomer death or a mid-map limit change). riverside4: the ban also lifts when the dead boomer's player gets the tank (riverside3 held it, so every spawn was hunters, until the tank died). |
 
 Our `l4d2_skill_detect` (skeet assists with reports off) and `l4d_rock_lagcomp` (`OnTankRockSkeeted` forward) fixes were merged upstream in 2026-09: use Harry's `l4d2_skill_detect` 2.4h ([L4D1_2-Plugins](https://github.com/fbef0102/L4D1_2-Plugins/tree/master/l4d2_skill_detect)). `l4d_rock_lagcomp` is back above with newer fixes (riverside4).
 

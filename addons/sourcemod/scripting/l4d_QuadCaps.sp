@@ -56,7 +56,7 @@ public Plugin:myinfo =
 	name = "L4D Quad Caps Control",
 	author = "Harry Potter",
 	description = "As the name says, you dumb fuck",
-	version = "1.5-riverside3",
+	version = "1.5-riverside4",
 	url = "http://steamcommunity.com/profiles/76561198026784913"
 }
 
@@ -234,6 +234,14 @@ public void Event_RoundStart(Event event, const char[] name, bool dontBroadcast)
 
 public void Event_PlayerSpawn(Event event, const char[] name, bool dontBroadcast)
 { 
+	// riverside4: a dead boomer's player who wins the tank never enters the ghost state, so
+	// riverside3 held the ban (hunters only) until the tank died and he ghosted again (match 710)
+	if (g_iBoomerUid != 0 && event.GetInt("userid") == g_iBoomerUid)
+	{
+		int client = GetClientOfUserId(g_iBoomerUid);
+		if (client && IsClientInGame(client) && BoomerHasNewClass()) BoomerGotNewClass();
+	}
+
 	if( g_iPlayerSpawn == 0 && g_iRoundStart == 1 )
 		CreateTimer(0.25, PluginStart);
 	g_iPlayerSpawn = 1;
@@ -333,11 +341,7 @@ public L4D_OnEnterGhostState(client)
 	// riverside3: the boomer's player now has his next class (CTerrorPlayer::Spawn picks it
 	// before the ghost state is entered), so a waiting lift can go ahead
 	if (g_iBoomerUid != 0 && GetClientUserId(client) == g_iBoomerUid)
-	{
-		g_iBoomerUid = 0;
-		if (g_bLiftPending && g_bLimitsOverridden) RestoreLimits();
-		g_bLiftPending = false;
-	}
+		BoomerGotNewClass();
 
 	if(!InSecondHalfOfRound())
 	{
@@ -514,7 +518,16 @@ bool BoomerHasNewClass()
 {
 	if (g_iBoomerUid == 0) return true;
 	new c = GetClientOfUserId(g_iBoomerUid);
-	return c == 0 || !IsClientInGame(c) || GetClientTeam(c) != TEAM_INFECTED;
+	if (c == 0 || !IsClientInGame(c) || GetClientTeam(c) != TEAM_INFECTED) return true;
+	// riverside4: alive as anything but a boomer (the tank, or a ghost of his next class)
+	return IsPlayerAlive(c) && GetEntProp(c, Prop_Send, "m_zombieClass") != ZC_BOOMER;
+}
+
+void BoomerGotNewClass()
+{
+	g_iBoomerUid = 0;
+	if (g_bLiftPending && g_bLimitsOverridden) RestoreLimits();
+	g_bLiftPending = false;
 }
 
 bool:InSecondHalfOfRound()
