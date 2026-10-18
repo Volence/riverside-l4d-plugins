@@ -24,6 +24,7 @@ Each plugin ships as source (`addons/sourcemod/scripting`) and compiled
 | `l4d_fling_fall_fix` | 1.2 | | Stops survivors dying to "fell too far" from short drops after a tank punch: fall damage is taken from the speed gravity could give. See below. |
 | `l4d_ping` | 3.7 | | Overwatch-style team pings: one bound key marks whatever you aim at (infected, item, weapon or spot) for your own team only. See below. |
 | `l4d_tank_punch_lagcomp` | 1.1 | DHooks, gamedata `l4d_tank_punch_lagcomp.txt` | A human tank's punch is lag compensated whether M1 is tapped or held. Stock only rewinds survivors while attack is held, and the fist is tested 0.5 to 0.7 s after the click. See below. |
+| `l4d_tank_punch_wall_fix` | 1.0 | DHooks, gamedata `l4d_tank_punch_wall_fix.txt` | A tank punch can no longer hit a survivor through a wall when something (a ladder, door, prop, common) stands in front of the wall. See below. |
 | `l4d_tank_fair_punch` | 0.4.0 | DHooks, gamedata `l4d_tank_fair_punch.txt` | The windup-end target scan follows the fist: no free hit on a survivor the fist never came near, and a hit for one the fist visibly went through at the end of the windup. See below. |
 | `l4d_rock_double_fix` | 1.0 | DHooks, gamedata `l4d_rock_double_fix.txt` | One tank rock can no longer hurt a survivor twice in the same tick. See below. |
 | `l4d_tongue_target` | 0.3 | DHooks, gamedata `l4d_tongue_target.txt` | When the smoker's crosshair is on several survivors, the nearest one gets the tongue (stock picks by client order), and survivors are judged where the smoker saw them. See below. |
@@ -408,6 +409,32 @@ checks, not from attack being held.
 Cvars: `l4d_tank_punch_lagcomp_enable`, `l4d_tank_punch_lagcomp_debug` (1 writes a line
 per punch to `logs/tank_punch_lagcomp.log`). `sm_punchlagcomp_stats` prints totals. The
 field's offset (Linux 6124) is in the gamedata.
+
+## Tank punch wall fix
+
+In versus, `CTankClaw::SweepFist` only lets a punch hit a survivor if a line from the
+tank's eye to the fist at contact does not hit the world. The test is
+`CGameTrace::DidHitWorld()`, which only asks whether the FIRST thing on that line is the
+world. When any other entity sits between the eye and the wall, the line stops on it,
+the test passes, and the punch lands through the wall behind it. The fist itself is
+often already past a thin wall (the windup seed is eye + forward * 56, and the arm
+reaches through), so the sweep never touches the wall either.
+
+Found in a live match on `l4d_vs_farm01_hilltop`: a tank climbing the infected ladder on
+the outside of the farmhouse's west wall punched a survivor standing inside. The ladder
+(`func_simpleladder`, brush contents `0x30000008`) is hit because `CONTENTS_GRATE` is in
+the punch trace mask. On a test server, calling the game's own `SweepFist` with the tank
+behind that ladder: the stock line stopped on the ladder and the survivor took 24; the
+same spacing beside the ladder stopped on the wall and nothing was hit.
+
+The plugin hooks `CTankClaw::OnHit` during a fist sweep and redoes the game's line (eye to
+the trace's end position) against the world only, ignoring every entity. If the world
+is in the way, the hit is dropped. Punches with a clear line are untouched, and so are
+ground pounds, which call `OnHit` themselves.
+
+Cvars: `l4d_tank_punch_wall_fix_enable` (0 off, 1 fix, 2 log only),
+`l4d_tank_punch_wall_fix_log` (1 writes every dropped hit to
+`logs/tank_punch_wall_fix.log`, with the entity that fooled the stock check).
 
 ## Tank fair punch
 

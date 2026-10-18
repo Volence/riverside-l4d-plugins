@@ -1,0 +1,76 @@
+"Games"
+{
+	"left4dead"
+	{
+		"Functions"
+		{
+			"CTankClaw::SweepFist"
+			{
+				"signature"	"CTankClaw::SweepFist"
+				"callconv"	"thiscall"
+				"return"	"void"
+				"this"		"entity"
+				"arguments"
+				{
+					"from"
+					{
+						"type"	"vectorptr"
+					}
+					"to"
+					{
+						"type"	"vectorptr"
+					}
+				}
+			}
+			"CTankClaw::OnHit"
+			{
+				"signature"	"CTankClaw::OnHit"
+				"callconv"	"thiscall"
+				"return"	"void"
+				"this"		"entity"
+				"arguments"
+				{
+					"tr"
+					{
+						"type"	"int"
+					}
+					"dir"
+					{
+						"type"	"vectorptr"
+					}
+					"bFirstHit"
+					{
+						"type"	"bool"
+					}
+				}
+			}
+		}
+		"Offsets"
+		{
+			// CGameTrace (CBaseTrace) layout, l4d-source types/hl2sdk-l4d.layouts.json
+			"CGameTrace::endpos"
+			{
+				"linux"		"12"
+			}
+			"CGameTrace::m_pEnt"
+			{
+				"linux"		"76"
+			}
+		}
+		"Signatures"
+		{
+			// server.so 0x30acbe
+			"CTankClaw::SweepFist"
+			{
+				"library"	"server"
+				"linux"		"@_ZN9CTankClaw9SweepFistERK6VectorS2_"
+			}
+			// server.so 0x30e0c6, vtable slot 398 (+0x638)
+			"CTankClaw::OnHit"
+			{
+				"library"	"server"
+				"linux"		"@_ZN9CTankClaw5OnHitER10CGameTraceRK6Vectorb"
+			}
+		}
+	}
+}
