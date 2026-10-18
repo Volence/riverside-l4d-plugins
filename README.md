@@ -55,6 +55,7 @@ Rotoblin already ships (`Roto2-AZ_mod.phrases`), and build against the Rotoblin-
 | `l4d_versus_rescue_door_fix` | 1.0-riverside2 | The rescue door unlock is written to the networked `m_bLocked`, so clients see it. |
 | `checkpoint-rage-control` | riverside2 | The "tank still loses rage" notice hooks the event the game really fires (`player_entered_checkpoint`) and checks the tank class (5 on L4D1). |
 | `l4d_QuadCaps` | 1.5-riverside4 | The temporary boomer ban only covers its own window (no more `z_versus_boomer_limit 0` left behind by an early boomer death or a mid-map limit change). riverside4: the ban also lifts when the dead boomer's player gets the tank (riverside3 held it, so every spawn was hunters, until the tank died). |
+| `l4d2_witch_crown_fix` | 1.2-riverside1 | A pump blast the fix counts as a crown now always kills. The old top-up to exactly `z_witch_health` could leave her on 1 HP. See below. |
 
 Our `l4d2_skill_detect` (skeet assists with reports off) and `l4d_rock_lagcomp` (`OnTankRockSkeeted` forward) fixes were merged upstream in 2026-09: use Harry's `l4d2_skill_detect` 2.4h ([L4D1_2-Plugins](https://github.com/fbef0102/L4D1_2-Plugins/tree/master/l4d2_skill_detect)). `l4d_rock_lagcomp` is back above with newer fixes (riverside4).
 
@@ -505,6 +506,26 @@ Main cvars: `l4d_nightmode_enable`, `l4d_nightmode_variant` (force a look),
 `l4d_nightmode_arcs`, `l4d_nightmode_sight_fog`, `l4d_nightmode_lamps` and the
 `l4d_nightmode_lamp_*` limits, `l4d_nightmode_live_lock`. The source header lists every
 config key.
+
+## The witch crown fix
+
+Visor's crown fix (L4D1 port by Harry) tops up a pump blast that reaches 799 damage, so
+pellet spread cannot spoil a crown. It set the top-up pellet to
+`z_witch_health - inflictedDamage + damage`, so the blast added up to exactly 1000.0 in float.
+
+The game does not take float damage off her. `CBaseCombatCharacter::OnTakeDamage_Alive` takes
+`floorf(damage)` per hit and puts the fraction in `m_flDamageAccumulator`, which pays out one
+whole point at a time once it reaches 1.0. The fractions of an exact 1000.0 should add up to a
+whole number, but float rounding often leaves the accumulator a hair under 1.0. When the top-up
+pellet is the last pellet to hit her (a weaker blast that only just reaches 799), nothing follows
+it, the last point never comes off, and she lives on exactly 1 HP and incaps the shooter.
+
+We saw it 6 times on our servers in two weeks, always at 1 HP. Replaying blasts on real witches
+where the 799 pellet is the last hit: the old math left her alive on 1 HP in 912 of 2000, the
+new one in 0 of 2000.
+
+riverside1 deals her current `m_iHealth` plus 10 on the top-up pellet. Overkill is harmless, and
+it no longer assumes she was at full health.
 
 ## Credits and license
 
