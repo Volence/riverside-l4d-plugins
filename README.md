@@ -25,6 +25,7 @@ Each plugin ships as source (`addons/sourcemod/scripting`) and compiled
 | `l4d_ping` | 3.7 | | Overwatch-style team pings: one bound key marks whatever you aim at (infected, item, weapon or spot) for your own team only. See below. |
 | `l4d_tank_punch_lagcomp` | 1.1 | DHooks, gamedata `l4d_tank_punch_lagcomp.txt` | A human tank's punch is lag compensated whether M1 is tapped or held. Stock only rewinds survivors while attack is held, and the fist is tested 0.5 to 0.7 s after the click. See below. |
 | `l4d_tank_punch_wall_fix` | 1.0 | DHooks, gamedata `l4d_tank_punch_wall_fix.txt` | A tank punch can no longer hit a survivor through a wall when something (a ladder, door, prop, common) stands in front of the wall. See below. |
+| `l4d_pounce_land_fix` | 1.0 | gamedata `l4d_pounce_land_fix.txt` (Linux) | A hunter whose pounce lands on a survivor's head can no longer start a second pounce before the pin goes through, which lost the pin or reset its damage to 1. See below. |
 | `l4d_tank_fair_punch` | 0.4.0 | DHooks, gamedata `l4d_tank_fair_punch.txt` | The windup-end target scan follows the fist: no free hit on a survivor the fist never came near, and a hit for one the fist visibly went through at the end of the windup. See below. |
 | `l4d_rock_double_fix` | 1.0 | DHooks, gamedata `l4d_rock_double_fix.txt` | One tank rock can no longer hurt a survivor twice in the same tick. See below. |
 | `l4d_tongue_target` | 0.3 | DHooks, gamedata `l4d_tongue_target.txt` | When the smoker's crosshair is on several survivors, the nearest one gets the tongue (stock picks by client order), and survivors are judged where the smoker saw them. See below. |
@@ -436,6 +437,41 @@ ground pounds, which call `OnHit` themselves.
 Cvars: `l4d_tank_punch_wall_fix_enable` (0 off, 1 fix, 2 log only),
 `l4d_tank_punch_wall_fix_log` (1 writes every dropped hit to
 `logs/tank_punch_wall_fix.log`, with the entity that fooled the stock check).
+
+## Pounce land fix
+
+A pounce never pins on contact. When a lunging hunter touches a survivor
+(`CLunge::HandleCustomCollision`) or lands on top of one
+(`CTerrorGameMovement::SetGroundEntity`), the game calls `CTerrorPlayer::OnLungedInto`,
+which only queues the pin on the survivor: a pending attacker and a due time of now +
+`z_pounce_delay`. `CTerrorPlayer::UpdatePounce`, in the survivor's own think, pins once
+that time has passed, and `OnPouncedOnSurvivor` works out the pounce damage from the
+hunter's `m_pounceStartPosition` at that moment.
+
+A touch in mid air keeps the hunter lunging until the pin lands. Standing on a head
+does not: it counts as ground, so `CLunge::UpdateAbility` ends the lunge on the same
+tick, and `z_lunge_interval` (0.1 s) later the hunter may pounce again. The pin comes
+due on the survivor's clock, and with real clients that can be later than 0.1 s. A
+hunter still pressing attack then starts a new pounce from the head. That new pounce
+resets the start position, so the queued pin lands with almost no distance (1 damage
+for a long dive), or, if the new pounce carries the hunter off the survivor, the pin
+is lost. To the hunter it feels like bouncing off the survivor's head.
+
+Found in a live match on Death Toll: a hunter dove roughly 1500 units onto a
+survivor's head, the log showed "ending a pounce", then "starting a pounce", then the
+pin, and the pin did 1 damage instead of the full bonus. On a test server (bot hunter
+dropped onto a standing survivor's head, `z_pounce_delay 0.15` to stand in for the
+live delay), pressing attack again during the wait lost the pin 12 times out of 12;
+with the plugin all 12 pinned with the original pounce distance. Without the extra
+press, head landings pin every time with or without the plugin.
+
+The plugin drops a hunter's attack button while a survivor has a pin queued from him,
+so the queued pin lands as the game meant it. The pin itself, and its timing, are
+still the game's. A queue older than 0.5 s is ignored so a pin the game never resolves
+cannot lock a hunter. The two offsets in the gamedata are for the Linux server.
+
+Cvars: `l4d_pounce_land_fix_enable` (0 off, 1 on), `l4d_pounce_land_fix_log` (1 writes
+each window in which presses were dropped to `logs/pounce_land_fix.log`).
 
 ## Tank fair punch
 
