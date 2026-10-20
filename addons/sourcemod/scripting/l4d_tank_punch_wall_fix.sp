@@ -5,7 +5,7 @@
 #include <sdktools>
 #include <dhooks>
 
-#define PLUGIN_VERSION "1.0"
+#define PLUGIN_VERSION "1.1"
 #define GAMEDATA "l4d_tank_punch_wall_fix"
 
 #define TEAM_SURVIVOR	2
@@ -33,6 +33,13 @@
 // the way the hit is dropped. That is the rule Valve wrote, with the entity in front no longer
 // hiding the wall. Hits the stock check already allowed with a clear world line are untouched,
 // and so are ground pounds (GroundPound calls OnHit itself, no line of sight by design).
+//
+// 1.1 (2026-10-20 log review): 53 of the first 54 BLOCK lines were repeat touches of a survivor
+// the same swing had already hit (bFirstHit false, no damage), and the "wall" was 13 to 33 units
+// BEHIND the survivor, because the line runs on to the fist cube's centre past him. Only a first
+// hit is judged now, and a hit is left alone when the stock line, entities included, reaches the
+// victim before anything else: nothing stands between the eye and him, so no wall can either.
+// Without that, a survivor with his back to a wall could lose a real first hit.
 //
 // l4d_tank_punch_wall_fix_enable: 0 off, 1 drop the hit, 2 log only.
 // l4d_tank_punch_wall_fix_log 1: logs/tank_punch_wall_fix.log, one line per dropped hit with the
@@ -120,6 +127,7 @@ MRESReturn Detour_OnHitPre(int claw, DHookParam hParams)
 	if( mode == 0 ) return MRES_Ignored;
 	int tank = g_iInSweep;
 	if( tank == 0 || OwnerTank(claw) != tank ) return MRES_Ignored;	// not a fist sweep (ground pound, other weapon)
+	if( !hParams.Get(3) ) return MRES_Ignored;	// a repeat touch this swing: no damage, nothing to judge
 
 	Address tr = view_as<Address>(hParams.Get(1));
 	if( tr == Address_Null ) return MRES_Ignored;
@@ -142,12 +150,14 @@ MRESReturn Detour_OnHitPre(int claw, DHookParam hParams)
 	delete wt;
 	if( !blocked ) return MRES_Ignored;
 
+	// what the stock line stops on first; the victim himself means the way to him is clear
+	Handle st = TR_TraceRayFilterEx(eye, end, PUNCH_MASK, RayType_EndPoint, Filter_NotTank, tank);
+	int by = TR_GetEntityIndex(st);
+	delete st;
+	if( by == victim ) return MRES_Ignored;
+
 	if( g_cvLog.BoolValue )
 	{
-		// what the stock line stopped on instead of the wall
-		Handle st = TR_TraceRayFilterEx(eye, end, PUNCH_MASK, RayType_EndPoint, Filter_NotTank, tank);
-		int by = TR_GetEntityIndex(st);
-		delete st;
 		char cls[64] = "world", map[64];
 		if( by > 0 && IsValidEntity(by) ) GetEntityClassname(by, cls, sizeof(cls));
 		GetCurrentMap(map, sizeof(map));

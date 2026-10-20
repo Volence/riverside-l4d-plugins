@@ -21,10 +21,10 @@ Each plugin ships as source (`addons/sourcemod/scripting`) and compiled
 | `l4d_hunter_phantom_fix` | 0.2 | | Stops a hunter killed mid-pounce from carrying on shredding (sound and claw blood at the pin spot) on clients after it dies. See below. |
 | `l4d_tank_rules` | 1.3.1 | gamedata `l4d_tank_rules.txt` (Linux + Windows) | While a tank is alive: survivor distance points are frozen, and primary weapon swaps can be locked, limited to one per tank, or made to cost a full reload. See below. |
 | `l4d_ledge_fix` | 1.1 | left4dhooks, gamedata `l4d_ledge_fix.txt` | Blocks ledge hangs over drops that could not hurt (a survivor hanging off a rock a few units above the floor). See below. |
-| `l4d_fling_fall_fix` | 1.2 | | Stops survivors dying to "fell too far" from short drops after a tank punch: fall damage is taken from the speed gravity could give. See below. |
+| `l4d_fling_fall_fix` | 1.3 | | Stops survivors dying to "fell too far" from short drops after a tank punch: fall damage is taken from the speed gravity could give. See below. |
 | `l4d_ping` | 3.7 | | Overwatch-style team pings: one bound key marks whatever you aim at (infected, item, weapon or spot) for your own team only. See below. |
 | `l4d_tank_punch_lagcomp` | 1.1 | DHooks, gamedata `l4d_tank_punch_lagcomp.txt` | A human tank's punch is lag compensated whether M1 is tapped or held. Stock only rewinds survivors while attack is held, and the fist is tested 0.5 to 0.7 s after the click. See below. |
-| `l4d_tank_punch_wall_fix` | 1.0 | DHooks, gamedata `l4d_tank_punch_wall_fix.txt` | A tank punch can no longer hit a survivor through a wall when something (a ladder, door, prop, common) stands in front of the wall. See below. |
+| `l4d_tank_punch_wall_fix` | 1.1 | DHooks, gamedata `l4d_tank_punch_wall_fix.txt` | A tank punch can no longer hit a survivor through a wall when something (a ladder, door, prop, common) stands in front of the wall. See below. |
 | `l4d_pounce_land_fix` | 1.0 | gamedata `l4d_pounce_land_fix.txt` (Linux) | A hunter whose pounce lands on a survivor's head can no longer start a second pounce before the pin goes through, which lost the pin or reset its damage to 1. See below. |
 | `l4d_tank_fair_punch` | 0.4.0 | DHooks, gamedata `l4d_tank_fair_punch.txt` | The windup-end target scan follows the fist: no free hit on a survivor the fist never came near, and a hit for one the fist visibly went through at the end of the windup. See below. |
 | `l4d_rock_double_fix` | 1.0 | DHooks, gamedata `l4d_rock_double_fix.txt` | One tank rock can no longer hurt a survivor twice in the same tick. See below. |
@@ -337,6 +337,12 @@ pulling someone down keeps its real speed.
 pits, which are `trigger_hurt` volumes doing fall damage, still kill. Falls are judged by
 their peak gravity-limited speed, which can only make the plugin step in less often.
 
+1.3: on long falls the tick-by-tick tracker read only 0.6 to 0.85 of the real landing speed,
+so 1.2 softened ordinary falls, real deaths included. The gravity-only speed now also has a
+floor from energy, v^2 = vz0^2 + 2g(z0 - z) from where the airborne stretch began, so a fall
+gravity alone explains is never changed. Replayed over four days of logged falls: every
+phantom short fall (20 units at 600+ u/s) is still fixed and every real fall is left alone.
+
 Cvars: `l4d_fling_fall_fix_enable` (0 off, 1 fix, 2 log only), `l4d_fling_fall_fix_log`
 (1 writes every corrected fall to `logs/fling_fall_fix.log`), `l4d_fling_fall_fix_margin`.
 
@@ -433,6 +439,11 @@ The plugin hooks `CTankClaw::OnHit` during a fist sweep and redoes the game's li
 the trace's end position) against the world only, ignoring every entity. If the world
 is in the way, the hit is dropped. Punches with a clear line are untouched, and so are
 ground pounds, which call `OnHit` themselves.
+
+1.1: only a punch's first hit on a survivor is judged (repeat touches in the same swing do
+no damage), and a hit is left alone when the game's line, entities included, reaches the
+survivor before anything else. In 1.0 the line ran on to the fist's centre past the
+survivor and found walls behind them.
 
 Cvars: `l4d_tank_punch_wall_fix_enable` (0 off, 1 fix, 2 log only),
 `l4d_tank_punch_wall_fix_log` (1 writes every dropped hit to
