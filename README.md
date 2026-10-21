@@ -26,7 +26,7 @@ Each plugin ships as source (`addons/sourcemod/scripting`) and compiled
 | `l4d_tank_punch_lagcomp` | 1.1 | DHooks, gamedata `l4d_tank_punch_lagcomp.txt` | A human tank's punch is lag compensated whether M1 is tapped or held. Stock only rewinds survivors while attack is held, and the fist is tested 0.5 to 0.7 s after the click. See below. |
 | `l4d_tank_punch_wall_fix` | 1.1 | DHooks, gamedata `l4d_tank_punch_wall_fix.txt` | A tank punch can no longer hit a survivor through a wall when something (a ladder, door, prop, common) stands in front of the wall. See below. |
 | `l4d_pounce_land_fix` | 1.0 | gamedata `l4d_pounce_land_fix.txt` (Linux) | A hunter whose pounce lands on a survivor's head can no longer start a second pounce before the pin goes through, which lost the pin or reset its damage to 1. See below. |
-| `l4d_physenv_teardown_fix` | 1.0 | gamedata `l4d_physenv_teardown_fix.txt` (Linux) | Stops a rare server crash at a level change: a use-after-free in vphysics while the physics world is torn down. Any map can hit it. See below. |
+| `l4d_physenv_teardown_fix` | 1.0 | gamedata `l4d_physenv_teardown_fix.txt` (Linux) | Closes a rare crash in vphysics at a level change (a use-after-free while the physics world is torn down). Any map can in theory hit it; we have not seen it on our live servers. See below. |
 | `l4d_tank_fair_punch` | 0.4.0 | DHooks, gamedata `l4d_tank_fair_punch.txt` | The windup-end target scan follows the fist: no free hit on a survivor the fist never came near, and a hit for one the fist visibly went through at the end of the windup. See below. |
 | `l4d_rock_double_fix` | 1.0 | DHooks, gamedata `l4d_rock_double_fix.txt` | One tank rock can no longer hurt a survivor twice in the same tick. See below. |
 | `l4d_tongue_target` | 0.3 | DHooks, gamedata `l4d_tongue_target.txt` | When the smoker's crosshair is on several survivors, the nearest one gets the tongue (stock picks by client order), and survivors are judged where the smoker saw them. See below. |
@@ -590,8 +590,9 @@ just freed. Normally every constraint is gone with its entity before that point 
 static weapon and item spawn is pinned to the world by a fixed constraint, about 100 a map,
 and they notify while the listener is still alive), so nothing happens. When a constraint
 does survive to the teardown and the freed memory has been reused, the call jumps through
-garbage. On our test servers that was about 1 level change in 25, on stock and custom maps.
-We traced it under gdb, logging every constraint created and every notify call.
+garbage. It is rare: we have not seen it on our live servers, only on test servers that
+changed level over and over right after loading, on stock and custom maps alike. We traced
+it under gdb, logging every constraint created and every notify call.
 
 The game turns constraint notify on for each new physics environment
 (`CPhysicsHook::LevelInitPreEntity`), and nothing needs it while a level shuts down. The
