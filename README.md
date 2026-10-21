@@ -26,7 +26,7 @@ Each plugin ships as source (`addons/sourcemod/scripting`) and compiled
 | `l4d_tank_punch_lagcomp` | 1.1 | DHooks, gamedata `l4d_tank_punch_lagcomp.txt` | A human tank's punch is lag compensated whether M1 is tapped or held. Stock only rewinds survivors while attack is held, and the fist is tested 0.5 to 0.7 s after the click. See below. |
 | `l4d_tank_punch_wall_fix` | 1.1 | DHooks, gamedata `l4d_tank_punch_wall_fix.txt` | A tank punch can no longer hit a survivor through a wall when something (a ladder, door, prop, common) stands in front of the wall. See below. |
 | `l4d_pounce_land_fix` | 1.0 | gamedata `l4d_pounce_land_fix.txt` (Linux) | A hunter whose pounce lands on a survivor's head can no longer start a second pounce before the pin goes through, which lost the pin or reset its damage to 1. See below. |
-| `l4d_physenv_teardown_fix` | 1.0 | gamedata `l4d_physenv_teardown_fix.txt` (Linux) | Closes a rare crash in vphysics at a level change (a use-after-free while the physics world is torn down). Any map can in theory hit it; we have not seen it on our live servers. See below. |
+| `l4d_physenv_teardown_fix` | 1.0 | gamedata `l4d_physenv_teardown_fix.txt` (Linux + Windows) | Closes a rare crash in vphysics at a level change (a use-after-free while the physics world is torn down). Any map can in theory hit it; we have not seen it on our live servers. See below. |
 | `l4d_tank_fair_punch` | 0.4.0 | DHooks, gamedata `l4d_tank_fair_punch.txt` | The windup-end target scan follows the fist: no free hit on a survivor the fist never came near, and a hit for one the fist visibly went through at the end of the windup. See below. |
 | `l4d_rock_double_fix` | 1.0 | DHooks, gamedata `l4d_rock_double_fix.txt` | One tank rock can no longer hurt a survivor twice in the same tick. See below. |
 | `l4d_tongue_target` | 0.3 | DHooks, gamedata `l4d_tongue_target.txt` | When the smoker's crosshair is on several survivors, the nearest one gets the tongue (stock picks by client order), and survivors are judged where the smoker saw them. See below. |
@@ -599,7 +599,12 @@ The game turns constraint notify on for each new physics environment
 plugin calls the engine's own `IPhysicsEnvironment::EnableConstraintNotify(false)` in
 `OnMapEnd`, which runs before the entities are removed, so every notify during the teardown
 returns at that check and never touches the listener. The gamedata finds the `physenv`
-global by its symbol in `server.so` and uses vtable index 66 (Linux).
+global by its symbol in `server.so` and uses vtable index 66 on Linux. On Windows it finds
+`physenv` through a signature in `server.dll` (the start of `CPhysicsHook::LevelInitPreEntity`'s
+physenv calls) and uses index 65, the same slot without the second destructor. The Windows
+gamedata was worked out from the 1.0.4.5 `server.dll` and `vphysics.dll` (the setter it calls
+writes the same `this+0x7c` flag); we run Linux servers, so it has not been run on a Windows
+server yet.
 
 ## Credits and license
 
