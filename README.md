@@ -26,6 +26,7 @@ Each plugin ships as source (`addons/sourcemod/scripting`) and compiled
 | `l4d_tank_punch_lagcomp` | 1.1 | DHooks, gamedata `l4d_tank_punch_lagcomp.txt` | A human tank's punch is lag compensated whether M1 is tapped or held. Stock only rewinds survivors while attack is held, and the fist is tested 0.5 to 0.7 s after the click. See below. |
 | `l4d_tank_punch_wall_fix` | 1.1 | DHooks, gamedata `l4d_tank_punch_wall_fix.txt` | A tank punch can no longer hit a survivor through a wall when something (a ladder, door, prop, common) stands in front of the wall. See below. |
 | `l4d_pounce_land_fix` | 1.0 | gamedata `l4d_pounce_land_fix.txt` (Linux) | A hunter whose pounce lands on a survivor's head can no longer start a second pounce before the pin goes through, which lost the pin or reset its damage to 1. See below. |
+| `l4d_physenv_teardown_fix` | 1.0 | gamedata `l4d_physenv_teardown_fix.txt` (Linux) | Stops a rare server crash at a level change: a use-after-free in vphysics while the physics world is torn down. Any map can hit it. See below. |
 | `l4d_tank_fair_punch` | 0.4.0 | DHooks, gamedata `l4d_tank_fair_punch.txt` | The windup-end target scan follows the fist: no free hit on a survivor the fist never came near, and a hit for one the fist visibly went through at the end of the windup. See below. |
 | `l4d_rock_double_fix` | 1.0 | DHooks, gamedata `l4d_rock_double_fix.txt` | One tank rock can no longer hurt a survivor twice in the same tick. See below. |
 | `l4d_tongue_target` | 0.3 | DHooks, gamedata `l4d_tongue_target.txt` | When the smoker's crosshair is on several survivors, the nearest one gets the tongue (stock picks by client order), and survivors are judged where the smoker saw them. See below. |
@@ -573,6 +574,31 @@ new one in 0 of 2000.
 
 riverside1 deals her current `m_iHealth` plus 10 on the top-up pellet. Overkill is harmless, and
 it no longer assumes she was at full health.
+
+## Physics teardown crash fix
+
+A level change can crash the server with SIGSEGV in
+`vphysics.so!CPhysicsEnvironment::NotifyConstraintDisabled`, under
+`CPhysicsHook::LevelShutdownPostEntity` -> `~CPhysicsEnvironment` -> `~CPhysicsObject` ->
+`CPhysicsConstraint::event_object_deleted`. It is a use-after-free in vphysics itself.
+
+`~CPhysicsEnvironment` deletes its constraint listener first (`this+0x6c`), and only then
+deletes the physics objects still in the world. Deleting an object that a live constraint
+holds fires `NotifyConstraintDisabled`, which checks only the constraint notify switch
+(`this+0x7c`, set by `EnableConstraintNotify`) and then calls through the listener it has
+just freed. Normally every constraint is gone with its entity before that point (each
+static weapon and item spawn is pinned to the world by a fixed constraint, about 100 a map,
+and they notify while the listener is still alive), so nothing happens. When a constraint
+does survive to the teardown and the freed memory has been reused, the call jumps through
+garbage. On our test servers that was about 1 level change in 25, on stock and custom maps.
+We traced it under gdb, logging every constraint created and every notify call.
+
+The game turns constraint notify on for each new physics environment
+(`CPhysicsHook::LevelInitPreEntity`), and nothing needs it while a level shuts down. The
+plugin calls the engine's own `IPhysicsEnvironment::EnableConstraintNotify(false)` in
+`OnMapEnd`, which runs before the entities are removed, so every notify during the teardown
+returns at that check and never touches the listener. The gamedata finds the `physenv`
+global by its symbol in `server.so` and uses vtable index 66 (Linux).
 
 ## Credits and license
 

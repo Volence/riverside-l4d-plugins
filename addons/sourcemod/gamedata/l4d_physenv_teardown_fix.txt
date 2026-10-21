@@ -1,0 +1,34 @@
+"Games"
+{
+	"left4dead"
+	{
+		"Addresses"
+		{
+			// server.so global IPhysicsEnvironment *physenv (the level's physics environment)
+			"physenv"
+			{
+				"linux"
+				{
+					"signature"	"physenv"
+				}
+			}
+		}
+		"Offsets"
+		{
+			// IPhysicsEnvironment::EnableConstraintNotify(bool): vphysics.so 0x22020, slot 66 of
+			// _ZTV19CPhysicsEnvironment (two destructors at 0 and 1)
+			"EnableConstraintNotify"
+			{
+				"linux"		"66"
+			}
+		}
+		"Signatures"
+		{
+			"physenv"
+			{
+				"library"	"server"
+				"linux"		"@physenv"
+			}
+		}
+	}
+}
