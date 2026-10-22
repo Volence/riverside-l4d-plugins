@@ -36,6 +36,8 @@ Each plugin ships as source (`addons/sourcemod/scripting`) and compiled
 | `l4d_dead_bot_sweep` | 0.1-riverside1 | | Kicks dead infected bots that a pause kept alive, so they can't fill the infected team when the tank spawns (the tank bot was kicked for "infected team is full"). |
 | `l4d_nightmode` | 0.9-riverside2 | DHooks, gamedata `l4d_nightmode.txt`, `configs/l4d_nightmode.cfg` | Turns daytime maps into night at runtime, no BSP changes: lighting, exposure, fog, lamps and per-map looks from the config. See below. |
 | `l4d_hide_viewmodel` | 1.2 | clientprefs, sdkhooks | `!noviewmodel` hides your own first-person gun and arms while the HUD (ammo, items) stays. Survivors only; infected keep their claws. Pills still show while you hold them. The choice is saved per player. See below. |
+| `l4d_rcon_abort_fix` | 1.0 | DHooks, gamedata `l4d_rcon_abort_fix.games.txt` (Linux) | An RCON connection closing no longer strands another connection's command: no more "rcon exec timeout" when two rcon tools share a server, and no command running twice. Engine bug, see below. |
+| `l4d_rcon_password_fix` | 1.0 | DHooks, gamedata `l4d_rcon_password_fix.games.txt` (Linux) | Setting `rcon_password` to the value it already has (every map change, if a cfg sets it) no longer closes every RCON connection. A real change still does. See below. |
 
 ## Fixed forks of existing plugins
 
@@ -632,6 +634,56 @@ game's own hides (the death fall camera) are left alone.
 Cvars: `l4d_hide_viewmodel_enable` (0 turns the command off and shows everyone's view model
 again), `l4d_hide_viewmodel_infected` (default 0: infected keep their claws; 1 hides them too), `l4d_hide_viewmodel_show` (comma-separated weapon classnames that stay visible,
 default `weapon_pain_pills`; for example `weapon_pain_pills,weapon_first_aid_kit,weapon_molotov,weapon_pipe_bomb`).
+
+## RCON fixes
+
+Two bugs in the L4D1 Linux engine's RCON server (`engine.so`), found while chasing a
+recurring "rcon exec timeout" between two tools that talk to the same server.
+
+**`l4d_rcon_abort_fix`.** `CRConServer::RunFrame` services the sockets newest first and
+clears a "socket closed" byte (`CRConServer+0x5c`) once per frame. Any close sets it.
+After running each request, RunFrame leaves the whole frame if the byte is set, before it
+consumes the request. So when a newer connection closes, an older connection with a request
+waiting in the same frame gets the command's output but its buffer still starts with that
+request. Nothing more is parsed on that connection until it sends at least 5 new bytes;
+then the stale request runs a second time. A client that sends a command plus an empty
+marker packet (the usual way to find the end of a multi-packet reply) never gets the
+marker's answer and times out. With closes in almost every frame it becomes a livelock: the
+same command runs over and over and nothing behind it ever runs.
+
+The byte exists so RunFrame never touches a socket the request itself closed. During a
+request only the requester's socket, or all of them, can close, so the plugin clears the
+byte right before each request (a detour on `SV_RedirectStart`, whose only caller is
+RunFrame, right before `CServerRemoteAccess::WriteDataRequest`). It hooks there rather than
+`WriteDataRequest` itself because every rcon command runs inside `WriteDataRequest`:
+unloading a plugin that detours it, from an rcon command, frees code the engine is about to
+return through. With this hook, loading, unloading and reloading over rcon are safe.
+
+**`l4d_rcon_password_fix`.** `ConVar::ChangeStringValue` calls the change callback without
+comparing old and new, and `RconPasswordChanged_f` closes every accepted RCON socket. A
+`server.cfg` (or a cfg it execs) that sets `rcon_password` therefore drops every open RCON
+connection on every map change, even though the password did not change. The plugin skips
+the callback when the new value equals the old one. The callback does only two things (close
+every socket, copy the value into the RCON server's password), and with the value unchanged
+the copy is a no-op. The plugin never sets the password itself.
+
+Both plugins check the engine code they rely on (the instructions that use the byte, the call
+targets, the callback's prologue) and attach nothing if any differ, so on another build the
+server simply runs stock RCON.
+
+Measured on a local server at 128 tick with SourceTV, with a long-lived client running
+commands while short-lived clients connect, run one command and close:
+
+| | Stock | With the plugins |
+|---|---|---|
+| Long batch, newer clients closing | 51 of 300 commands timed out, 48 ran twice | 0 of 2,000 timed out, 0 ran twice |
+| Four loops of closing clients | (earlier run) 397 of 400 timed out, one command ran 397 times | 0 of 2,000 |
+| `rcon_password <same value>` with 2 others connected | all 3 closed | none closed |
+| `changelevel` with a connection held open | closed 0.4 s later | stays open and answers |
+
+Not fixed: when a client resets (RST) while the server still has an answer queued for it,
+RunFrame closes it and then closes the same index again, which by then is the next newer
+connection. Clients avoid that by reading until the last reply before closing.
 
 ## Credits and license
 

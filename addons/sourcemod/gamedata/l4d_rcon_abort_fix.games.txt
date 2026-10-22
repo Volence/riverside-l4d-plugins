@@ -1,0 +1,113 @@
+// l4d_rcon_abort_fix 1.0 (Malevolence). L4D1 Linux engine.so, sha256 0d3f61c2ef220fa6... (every
+// Riverside box, 2026-10-23). engine.so is not stripped, so symbols are enough. The plugin also checks
+// the RunFrame instructions below and refuses to attach if any differ.
+"Games"
+{
+	"left4dead"
+	{
+		"Offsets"
+		{
+			// CRConServer+0x5c: set by OnSocketClosed on any close, tested after each request
+			"CRConServer::m_bSocketClosedThisFrame"
+			{
+				"linux"		"92"
+			}
+			// RunFrame 0x1ae182 + 0x41 = 0x1ae1c3: movb $0x0,0x5c(%esi)  (c6 46 5c 00)
+			"RunFrame_ClearFlag"
+			{
+				"linux"		"65"
+			}
+			// RunFrame + 0x7f0 = 0x1ae972: cmpb $0x0,0x5c(%eax)  (80 78 5c 00)
+			"RunFrame_TestFlag"
+			{
+				"linux"		"2032"
+			}
+			// RunFrame + 0x7aa = 0x1ae92c: call SV_RedirectStart
+			"RunFrame_CallRedirectStart"
+			{
+				"linux"		"1962"
+			}
+			// RunFrame + 0x7e0 = 0x1ae962: call CServerRemoteAccess::WriteDataRequest
+			"RunFrame_CallWriteDataRequest"
+			{
+				"linux"		"2016"
+			}
+		}
+		"Addresses"
+		{
+			"CRConServer::RunFrame"
+			{
+				"linux"
+				{
+					"signature"	"CRConServer::RunFrame"
+				}
+			}
+			"SV_RedirectStart"
+			{
+				"linux"
+				{
+					"signature"	"SV_RedirectStart"
+				}
+			}
+			"CServerRemoteAccess::WriteDataRequest"
+			{
+				"linux"
+				{
+					"signature"	"CServerRemoteAccess::WriteDataRequest"
+				}
+			}
+			// the one CRConServer that RCONServer() returns (0x3578c0)
+			"g_RCONServer"
+			{
+				"linux"
+				{
+					"signature"	"g_RCONServer"
+				}
+			}
+		}
+		"Signatures"
+		{
+			"CRConServer::RunFrame"
+			{
+				"library"	"engine"
+				"linux"		"@_ZN11CRConServer8RunFrameEv"
+			}
+			"SV_RedirectStart"
+			{
+				"library"	"engine"
+				"linux"		"@_Z16SV_RedirectStart10redirect_tPK8netadr_s"
+			}
+			"CServerRemoteAccess::WriteDataRequest"
+			{
+				"library"	"engine"
+				"linux"		"@_ZN19CServerRemoteAccess16WriteDataRequestEP11CRConServerjPKvi"
+			}
+			"g_RCONServer"
+			{
+				"library"	"engine"
+				"linux"		"@_ZL12g_RCONServer"
+			}
+		}
+		"Functions"
+		{
+			// void SV_RedirectStart(redirect_t target, const netadr_t *addr)
+			"SV_RedirectStart"
+			{
+				"signature"	"SV_RedirectStart"
+				"callconv"	"cdecl"
+				"return"	"void"
+				"arguments"
+				{
+					"target"
+					{
+						"type"	"int"
+					}
+					"addr"
+					{
+						"type"	"int"
+					}
+				}
+			}
+		}
+	}
+}
