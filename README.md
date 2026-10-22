@@ -35,7 +35,7 @@ Each plugin ships as source (`addons/sourcemod/scripting`) and compiled
 | `l4d_tank_reconnect` | 0.2 | left4dhooks (its `left4dhooks.l4d1.txt` gamedata) | A tank whose player drops gets the tank back on rejoin, with the same health, rage, rage grace timer, burning state and pass count, through the game's own bot handoff (`CTerrorPlayer::TakeOverZombieBot`). Works during a pause. |
 | `l4d_dead_bot_sweep` | 0.1-riverside1 | | Kicks dead infected bots that a pause kept alive, so they can't fill the infected team when the tank spawns (the tank bot was kicked for "infected team is full"). |
 | `l4d_nightmode` | 0.9-riverside2 | DHooks, gamedata `l4d_nightmode.txt`, `configs/l4d_nightmode.cfg` | Turns daytime maps into night at runtime, no BSP changes: lighting, exposure, fog, lamps and per-map looks from the config. See below. |
-| `l4d_hide_viewmodel` | 1.1 | clientprefs, sdkhooks | `!noviewmodel` hides your own first-person gun and arms while the HUD (ammo, items) stays. Pills still show while you hold them. The choice is saved per player. See below. |
+| `l4d_hide_viewmodel` | 1.2 | clientprefs, sdkhooks | `!noviewmodel` hides your own first-person gun and arms while the HUD (ammo, items) stays. Survivors only; infected keep their claws. Pills still show while you hold them. The choice is saved per player. See below. |
 
 ## Fixed forks of existing plugins
 
@@ -630,7 +630,7 @@ The plugin only turns the flag back on when it was the one that turned it off, s
 game's own hides (the death fall camera) are left alone.
 
 Cvars: `l4d_hide_viewmodel_enable` (0 turns the command off and shows everyone's view model
-again), `l4d_hide_viewmodel_show` (comma-separated weapon classnames that stay visible,
+again), `l4d_hide_viewmodel_infected` (default 0: infected keep their claws; 1 hides them too), `l4d_hide_viewmodel_show` (comma-separated weapon classnames that stay visible,
 default `weapon_pain_pills`; for example `weapon_pain_pills,weapon_first_aid_kit,weapon_molotov,weapon_pipe_bomb`).
 
 ## Credits and license

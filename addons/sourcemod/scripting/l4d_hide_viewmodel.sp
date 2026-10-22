@@ -13,6 +13,7 @@
  *
  * Weapons named in l4d_hide_viewmodel_show (pills by default) still draw, so
  * players can see what they are holding; a weapon switch hook updates at once.
+ * Infected keep their claws unless l4d_hide_viewmodel_infected is 1.
  * We only ever turn the flag back on if we were the ones who turned it off, so
  * the game's own hides (death fall camera) are left alone.
  */
@@ -24,10 +25,12 @@
 #include <clientprefs>
 #include <sdkhooks>
 
-#define PLUGIN_VERSION	"1.1"
+#define PLUGIN_VERSION	"1.2"
+#define TEAM_SURVIVOR	2
 
 ConVar g_cvEnable;
 ConVar g_cvShow;
+ConVar g_cvInfected;
 Cookie g_hCookie;
 bool g_bHide[MAXPLAYERS + 1];	// the player asked for !noviewmodel
 bool g_bWeHid[MAXPLAYERS + 1];	// m_bDrawViewmodel is false because we set it
@@ -47,6 +50,7 @@ public void OnPluginStart()
 	// SetString: a reload keeps the old cvar, and its old value with it
 	CreateConVar("l4d_hide_viewmodel_version", PLUGIN_VERSION, "l4d_hide_viewmodel version", FCVAR_NOTIFY | FCVAR_DONTRECORD).SetString(PLUGIN_VERSION);
 	g_cvShow = CreateConVar("l4d_hide_viewmodel_show", "weapon_pain_pills", "Comma-separated weapon classnames that stay visible with !noviewmodel on", FCVAR_NOTIFY);
+	g_cvInfected = CreateConVar("l4d_hide_viewmodel_infected", "0", "1 = !noviewmodel also hides infected claws", FCVAR_NOTIFY, true, 0.0, true, 1.0);
 	g_cvEnable.AddChangeHook(OnEnableChanged);
 
 	g_hCookie = new Cookie("hide_viewmodel", "1 = hide your first-person gun and arms", CookieAccess_Protected);
@@ -151,12 +155,13 @@ Action Timer_Enforce(Handle timer)
 	return Plugin_Continue;
 }
 
-// Hide unless the active weapon is on the show list. SetEntProp marks m_Local
+// Hide unless the active weapon is on the show list (or the player is infected
+// and infected are not hidden). SetEntProp marks m_Local
 // changed, so only write on a real change.
 void Update(int client)
 {
 	bool draw = GetEntProp(client, Prop_Send, "m_bDrawViewmodel") != 0;
-	if (IsShownWeapon(client))
+	if (IsShownWeapon(client) || (GetClientTeam(client) != TEAM_SURVIVOR && !g_cvInfected.BoolValue))
 	{
 		Restore(client);
 	}
