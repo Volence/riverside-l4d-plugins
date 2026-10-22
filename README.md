@@ -35,6 +35,7 @@ Each plugin ships as source (`addons/sourcemod/scripting`) and compiled
 | `l4d_tank_reconnect` | 0.2 | left4dhooks (its `left4dhooks.l4d1.txt` gamedata) | A tank whose player drops gets the tank back on rejoin, with the same health, rage, rage grace timer, burning state and pass count, through the game's own bot handoff (`CTerrorPlayer::TakeOverZombieBot`). Works during a pause. |
 | `l4d_dead_bot_sweep` | 0.1-riverside1 | | Kicks dead infected bots that a pause kept alive, so they can't fill the infected team when the tank spawns (the tank bot was kicked for "infected team is full"). |
 | `l4d_nightmode` | 0.9-riverside2 | DHooks, gamedata `l4d_nightmode.txt`, `configs/l4d_nightmode.cfg` | Turns daytime maps into night at runtime, no BSP changes: lighting, exposure, fog, lamps and per-map looks from the config. See below. |
+| `l4d_hide_viewmodel` | 1.1 | clientprefs, sdkhooks | `!noviewmodel` hides your own first-person gun and arms while the HUD (ammo, items) stays. Pills still show while you hold them. The choice is saved per player. See below. |
 
 ## Fixed forks of existing plugins
 
@@ -612,6 +613,25 @@ physenv calls) and uses index 65, the same slot without the second destructor. T
 gamedata was worked out from the 1.0.4.5 `server.dll` and `vphysics.dll` (the setter it calls
 writes the same `this+0x7c` flag); we run Linux servers, so it has not been run on a Windows
 server yet.
+
+## Hide view model
+
+Some players hid their gun by pushing the view model FOV to 180 or more with a client DLL.
+That breaks the math the client uses to draw the view model, and the weapon half of the HUD
+(ammo, the item slots) disappears with it. Hiding it properly with `r_drawviewmodel 0` is a
+cheat cvar on L4D1.
+
+The server has its own switch: `m_Local.m_bDrawViewmodel`, which the client checks before it
+draws view models and for nothing else, so the HUD is untouched. `!noviewmodel` (or
+`!viewmodel`) toggles it for the player who types it, and the choice is kept in a client
+cookie. The game sets the flag back on by itself (entering ghost state, survivor cameras,
+bot replacement), so a 0.2 s timer re-hides it, and a weapon switch hook updates at once.
+The plugin only turns the flag back on when it was the one that turned it off, so the
+game's own hides (the death fall camera) are left alone.
+
+Cvars: `l4d_hide_viewmodel_enable` (0 turns the command off and shows everyone's view model
+again), `l4d_hide_viewmodel_show` (comma-separated weapon classnames that stay visible,
+default `weapon_pain_pills`; for example `weapon_pain_pills,weapon_first_aid_kit,weapon_molotov,weapon_pipe_bomb`).
 
 ## Credits and license
 
