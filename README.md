@@ -12,7 +12,7 @@ Each plugin ships as source (`addons/sourcemod/scripting`) and compiled
 
 | Plugin | Version | Needs | What it does |
 |---|---|---|---|
-| `l4d_witch_fixes` | 1.1.1 | DHooks, gamedata `l4d_witch_fixes.txt` (Linux + Windows) | The witch's movement fixes in one plugin: she no longer freezes on corners at a low `nb_update_frequency`, no longer cuts straight at a survivor over a pit or open air, no longer climbs and slides off the same prop or rounded ledge forever, and map fire no longer steals her target. Replaces `l4d_witch_corner_fix`, `l4d_witch_direct_fix` and `l4d_witch_fire_fix`. See below. |
+| `l4d_witch_fixes` | 1.3.0 | DHooks, gamedata `l4d_witch_fixes.txt` (Linux + Windows) | The witch's movement fixes in one plugin: she no longer freezes on corners at a low `nb_update_frequency`, no longer cuts straight at a survivor over a pit or open air, no longer climbs and slides off the same prop or rounded ledge forever, map fire no longer steals her target, a special infected bumping her no longer becomes her victim, and a dying common under her feet no longer flings her into the air. Replaces `l4d_witch_corner_fix`, `l4d_witch_direct_fix` and `l4d_witch_fire_fix`. See below. |
 | `l4d_witch_unstuck` | 2.5.0 | left4dhooks, gamedata `l4d_witch_unstuck.txt` (Linux) | Fallback for a witch that makes no progress toward her target for 3 s: nudges her 8/16/24 units off the snag, then allows a short hop to a nearby nav spot (at most 120 units sideways, never when she is already within 120 units of her target). `!stuckwitch` logs a snapshot for admins. 2.5.0: never moves her off someone she is killing (a survivor who body-blocks her twice silently becomes her victim), and a witch set off by a smoker, lunging hunter or tank is tracked toward the survivor that player is moving, as the game does. |
 | `l4d_saferoom_lock` | 1.2 | left4dhooks | Holds the end saferoom door open and unusable while a tank or witch is still alive. |
 | `l4d_skypounce` | 0.4.0 | | Stops hunters chaining pounces off the sky brush ("ceiling pouncing"). Mode 1 is Zen's rule, mode 2 a last-surface-touched rule. |
@@ -142,8 +142,8 @@ uses its answer at `player_death`. Without lagcomp it behaves as before.
 
 ## The witch fixes
 
-`l4d_witch_fixes` holds four fixes for how a startled witch moves. Each has its own on/off cvar
-that works live (`l4d_witch_fixes_corner`, `_direct`, `_climb`, `_fire`, all 1 by default), and each
+`l4d_witch_fixes` holds six fixes for how a startled witch moves. Each has its own on/off cvar
+that works live (`l4d_witch_fixes_corner`, `_direct`, `_climb`, `_fire`, `_victim`, `_launch`, all 1 by default), and each
 checks its own hooks when the plugin loads: on Linux every vtable slot it hooks is compared with
 the function the server's symbols say should be there, and on Windows the patched bytes are
 checked. A fix that finds a mismatch (a game update moved something) turns only itself off and
@@ -223,9 +223,32 @@ to a witch unless a survivor dealt it or it comes from her own flame (lit by a s
 has since left), which also keeps map fire from igniting her. Molotovs and gas cans are
 unchanged.
 
+### Infected victims (Linux only)
+
+A startled witch takes a new victim from whoever bumps into her twice
+(`WitchAttack::OnContact` calls `WitchAttack::SetVictim`, `z_witch_allow_change_victim`), and
+that includes special infected: a hunter landing on her makes the hunter her victim and she
+drops the survivor she was after. Once she has a victim, a switch to an infected player is
+refused. A survivor who gets in her way can still become her victim, and her first victim is
+never touched. Needs a `WitchAttack::SetVictim` signature from server.dll before it can run on
+Windows.
+
+### Launches (Linux only)
+
+`ZombieBotLocomotion::Update` sets the witch's velocity to how far she really moved over the
+update. The sideways part is capped at run speed, the upward part is not. So when collision
+handling lifts her a few units (onto a common that has just died: its body stays solid for 2
+to 3 s), the lift becomes an upward speed of lift / update interval. At `nb_update_frequency
+0.014` that is about 700 units/s, and she flies up to 300 units into the air and lands on her
+victim. At the default 0.1 the same lift is a small hop. After each of her updates the fix
+zeroes an upward speed above `l4d_witch_fixes_launch_max` (150) unless she is climbing. Her
+position is never touched, so stairs and climbs move as before. On a test server with a common
+killed in her path, she launched in 5 of 80 runs without the fix (also with no plugins at all)
+and 0 of 60 with it.
+
 ### Windows
 
-All four fixes run on Windows from 1.1.0. Every hooked vtable slot is checked at load against
+The first four fixes run on Windows from 1.1.0 (victim and launch are Linux only so far). Every hooked vtable slot is checked at load against
 the function it must hold, found by a unique signature in server.dll (on Linux, by symbol), and
 the climb fix also checks each witch's INextBot table. Windows layout: WitchLocomotion slots
 Update 36, IsPotentiallyTraversable 82, ClimbUpToLedge 41; INextBot IsAbleToClimbOnto 51; the
