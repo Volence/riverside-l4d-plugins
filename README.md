@@ -51,7 +51,7 @@ Rotoblin already ships (`Roto2-AZ_mod.phrases`), and build against the Rotoblin-
 | `l4d_bossvote` | 1.5-survivorflow-riverside1 | A voted boss % means true survivor flow. The engine spawns at flow minus `versus_boss_buffer`, so `!voteboss 40` used to put the tank several % early. All 6 parse sites are patched (upstream's 2022 fix covered 2), and 0 still means "no boss". |
 | `l4d_boss_percent` | 1.6.3-riverside1 | Shows the same true-flow numbers as the patched boss vote. |
 | `l4d_current_survivor_progress` | 2.3-riverside2 | `!cur` uses the same true-flow numbers. |
-| `l4d_collision_adjustments` | 1.2h-riverside3 | A hunter aimed at a downed survivor now lands on him, and the hunter pass-through only applies to the hunter's own movement, so a downed survivor's shots still hit a pouncing hunter. Needs the CollisionHook extension, DHooks and the `l4d_no_m2_movement_block.txt` gamedata. See below. |
+| `l4d_collision_adjustments` | 1.3h-riverside1 | Upstream 1.3h (commons walk through weapons and items, survivors don't snag on infected ladders, and a hunter only passes through a downed survivor his hull already overlaps when the pounce starts, so an aimed pounce lands). riverside1: the hunter pass-through only applies to the hunter's own movement, so a downed survivor's shots still hit a pouncing hunter. Needs the CollisionHook extension, DHooks and the `l4d_no_m2_movement_block.txt` gamedata. See below. |
 | `l4d_tankpunchstuckfix` | 0.6-riverside6 | A survivor a tank punch leaves inside the ceiling or a wall is put back where he really was. Needs left4dhooks. See below. |
 | `l4d_infected_collisions` | riverside2 | Forgetest's plugin with one cvar per mover (riverside2: the witch setting now really applies to her, by detouring `ZombieBotLocomotion::DetectCollision`; `sm_infcoll_stats`): `l4d_infected_collisions_common` (1) lets commons walk through a pulled, choked or pounced survivor, `l4d_infected_collisions_witch` (0) keeps the witch colliding with him. Needs DHooks, gamedata `l4d_infected_collisions.txt`, and Forgetest's `gamedatawrapper` include. |
 | `l4d_lagcomp_skeet` | 1.4-riverside4 | Actually runs on L4D1 (the attacker offset was the L4D2 one), no longer crashes the server when a skeet ends a pounce, and tells stat plugins about the skeets it rescues. riverside4: a lunging hunter shot where the shooter saw him before the lunge takes stock skeet damage (it used to be stunned for 0.5 s instead). Needs DHooks. See below. |
@@ -68,15 +68,20 @@ Our `l4d2_skill_detect` (skeet assists with reports off) and `l4d_rock_lagcomp` 
 
 ## The hunter pounce on a downed survivor
 
-`l4d_collision_adjustments_hunter_incap 1` turns off hunter collision with downed
-survivors for the first 0.09 s of every pounce, so a hunter pouncing someone else isn't
-grabbed by a downed survivor on the way. From about 40 units that window covers the whole
-flight, so a hunter standing next to a downed survivor could never pounce him.
+Up to 1.2h, `l4d_collision_adjustments_hunter_incap 1` turned off hunter collision with
+downed survivors for the first 0.09 s of every pounce. From about 40 units that window
+covers the whole flight, so a hunter standing next to a downed survivor could never pounce
+him. Our 1.2h forks added an aim rule for it.
 
-The fork adds `l4d_collision_adjustments_hunter_incap_aim` (default 60). When the pounce
-starts, the survivor closest to the hunter's crosshair (within that many degrees) keeps
-his collision if he is downed, so an aimed pounce lands. Downed survivors he isn't aimed
-at are still passed through. 0 brings back the old behaviour.
+Upstream 1.3h fixes it differently: when the pounce starts, only a downed survivor whose
+hull already overlaps the hunter's is passed through (for 0.5 s, so he can get out of him).
+Everyone else keeps normal collision, so an aimed pounce lands, and the aim rule (and its
+`_aim` cvar) is gone. On our test rig 1.3h landed 6 of 6 in every aimed case, including
+a hunter standing on a downed survivor and aimed at the reviver.
+
+The 1.3h rule lives in the collision callback, which also sees bullet traces. Our gate
+(riverside1 of this version) limits it to the hunter's own movement, so a downed survivor
+can still shoot a hunter that overlaps him.
 
 ## The tank punch ceiling stuck
 
