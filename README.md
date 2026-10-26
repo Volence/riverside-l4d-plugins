@@ -38,6 +38,7 @@ Each plugin ships as source (`addons/sourcemod/scripting`) and compiled
 | `l4d_hide_viewmodel` | 1.2 | clientprefs, sdkhooks | `!noviewmodel` hides your own first-person gun and arms while the HUD (ammo, items) stays. Survivors only; infected keep their claws. Pills still show while you hold them. The choice is saved per player. See below. |
 | `l4d_rcon_abort_fix` | 1.0 | DHooks, gamedata `l4d_rcon_abort_fix.games.txt` (Linux) | An RCON connection closing no longer strands another connection's command: no more "rcon exec timeout" when two rcon tools share a server, and no command running twice. Engine bug, see below. |
 | `l4d_rcon_password_fix` | 1.0 | DHooks, gamedata `l4d_rcon_password_fix.games.txt` (Linux) | Setting `rcon_password` to the value it already has (every map change, if a cfg sets it) no longer closes every RCON connection. A real change still does. See below. |
+| `l4d_onslaught_tank_pause` | 1.0 | | For converted L4D2 maps whose onslaughts (a horde that keeps coming until a button is pressed) are rebuilt with `director_panic_forever` by relays named `l4d1_onslaught_on` / `l4d1_onslaught_off`: while any tank is alive the endless horde is held off, and when the last tank dies it comes back with a fresh panic, unless the button was pressed meanwhile. See below. |
 
 ## Fixed forks of existing plugins
 
@@ -707,6 +708,37 @@ commands while short-lived clients connect, run one command and close:
 Not fixed: when a client resets (RST) while the server still has an answer queued for it,
 RunFrame closes it and then closes the same index again, which by then is the next newer
 connection. Clients avoid that by reading until the last reply before closing.
+
+## Onslaught tank pause
+
+L4D1 has no VScript, so the continuous L4D2 onslaughts in converted maps (Dead Air 2's
+trap, Carried Off 3's sparks, Diescraper 3's gauntlet and so on) are rebuilt in stripper:
+the start trigger fires a `logic_relay` named `l4d1_onslaught_on` that sets
+`director_panic_forever 1` (through `sm_cvar`, it is a cheat cvar) and sends a `PanicEvent`,
+and the button that ends it fires `l4d1_onslaught_off`, which sets it back to 0. The
+generator is `onslaught.py` in [l4d2-to-l4d1](https://github.com/Volence/l4d2-to-l4d1).
+
+With a tank up that horde never lets up. This plugin hooks those two relays. On
+`tank_spawn` during an onslaught it holds `director_panic_forever` at 0 (a change hook
+bounces anything that sets it back to 1), so the running panic winds down. When no live,
+standing tank is left (checked 0.5 s after a death or disconnect) it sets 1 again and fires
+a `PanicEvent`, unless `l4d1_onslaught_off` fired in the meantime. An onslaught that starts
+with a tank already up waits for the tank the same way. It does nothing on maps without
+those relays, and it does not touch finale gauntlets.
+
+## Tools
+
+`tools/stripper_close_brush_window.py` closes the L4D1 map-load crash from model-less
+`func_brush` blockers (the `losfix_*` LOS blockers ported from L4D2). Such a brush spawns
+`SOLID_VPHYSICS` with a NULL model until its `logic_auto` `AddOutput,solid 2` fires on the first
+tick, and L4D1's `CM_VCollideForModel` has no NULL check, so a trace that touches it first
+(the director's `IsSpaceForZombieHere` at map load) segfaults the server. For every such
+brush with a matching solid output it adds `"StartDisabled" "1"` and an `Enable` 0.1 s after
+the solid output. It only inserts lines and keeps line endings.
+
+    python3 tools/stripper_close_brush_window.py [--check] file.cfg [file.cfg ...]
+
+`--check` reports without writing; without it the files are edited in place.
 
 ## Credits and license
 
