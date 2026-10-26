@@ -229,17 +229,16 @@ to a witch unless a survivor dealt it or it comes from her own flame (lit by a s
 has since left), which also keeps map fire from igniting her. Molotovs and gas cans are
 unchanged.
 
-### Infected victims (Linux only)
+### Infected victims
 
 A startled witch takes a new victim from whoever bumps into her twice
 (`WitchAttack::OnContact` calls `WitchAttack::SetVictim`, `z_witch_allow_change_victim`), and
 that includes special infected: a hunter landing on her makes the hunter her victim and she
 drops the survivor she was after. Once she has a victim, a switch to an infected player is
 refused. A survivor who gets in her way can still become her victim, and her first victim is
-never touched. Needs a `WitchAttack::SetVictim` signature from server.dll before it can run on
-Windows.
+never touched.
 
-### Launches (Linux only)
+### Launches
 
 `ZombieBotLocomotion::Update` sets the witch's velocity to how far she really moved over the
 update. The sideways part is capped at run speed, the upward part is not. So when collision
@@ -254,11 +253,16 @@ and 0 of 60 with it.
 
 ### Windows
 
-The first four fixes run on Windows from 1.1.0 (victim and launch are Linux only so far). Every hooked vtable slot is checked at load against
+All six fixes run on Windows. The first four have since 1.1.0; victim and launch need the
+gamedata from 2026-10-26 or later (the 1.3.0 plugin itself is unchanged, so updating
+`l4d_witch_fixes.txt` is enough). Every hooked vtable slot is checked at load against
 the function it must hold, found by a unique signature in server.dll (on Linux, by symbol), and
 the climb fix also checks each witch's INextBot table. Windows layout: WitchLocomotion slots
 Update 36, IsPotentiallyTraversable 82, ClimbUpToLedge 41; INextBot IsAbleToClimbOnto 51; the
-witch's INextBot at +2204 and her locomotion at +0xD78. All of that was verified against the
+witch's INextBot at +2204 and her locomotion at +0xD78. Victim: `WitchAttack::SetVictim`
+(thiscall, one argument) by signature, the victim handle at +0x34 as on Linux. Launch:
+WitchLocomotion slot 44 `IsClimbingOrJumping` (checked against its signature), the velocity at
++0x60 and the ground handle at +0xB8 as on Linux. All of that was verified against the
 current server.dll, but none of it has been run on a Windows server yet: if a check fails, that
 fix stays off and the log says which one, so please send us the log line.
 
