@@ -35,7 +35,7 @@ Each plugin ships as source (`addons/sourcemod/scripting`) and compiled
 | `l4d_tank_reconnect` | 0.2 | left4dhooks (its `left4dhooks.l4d1.txt` gamedata) | A tank whose player drops gets the tank back on rejoin, with the same health, rage, rage grace timer, burning state and pass count, through the game's own bot handoff (`CTerrorPlayer::TakeOverZombieBot`). Works during a pause. |
 | `l4d_dead_bot_sweep` | 0.1-riverside1 | | Kicks dead infected bots that a pause kept alive, so they can't fill the infected team when the tank spawns (the tank bot was kicked for "infected team is full"). |
 | `l4d_nightmode` | 0.9-riverside2 | DHooks, gamedata `l4d_nightmode.txt`, `configs/l4d_nightmode.cfg` | Turns daytime maps into night at runtime, no BSP changes: lighting, exposure, fog, lamps and per-map looks from the config. See below. |
-| `l4d_hide_viewmodel` | 1.2 | clientprefs, sdkhooks | `!noviewmodel` hides your own first-person gun and arms while the HUD (ammo, items) stays. Survivors only; infected keep their claws. Pills still show while you hold them. The choice is saved per player. See below. |
+| `l4d_hide_viewmodel` | 1.3 | clientprefs, sdkhooks | `!noviewmodel` hides your own first-person gun and arms while the HUD (ammo, items) stays. `!noviewmodel 2` hides only your main weapon. Survivors only; infected keep their claws. Pills still show while you hold them. The choice is saved per player. See below. |
 | `l4d_rcon_abort_fix` | 1.0 | DHooks, gamedata `l4d_rcon_abort_fix.games.txt` (Linux) | An RCON connection closing no longer strands another connection's command: no more "rcon exec timeout" when two rcon tools share a server, and no command running twice. Engine bug, see below. |
 | `l4d_rcon_password_fix` | 1.0 | DHooks, gamedata `l4d_rcon_password_fix.games.txt` (Linux) | Setting `rcon_password` to the value it already has (every map change, if a cfg sets it) no longer closes every RCON connection. A real change still does. See below. |
 | `l4d_onslaught_tank_pause` | 1.0 | | For converted L4D2 maps whose onslaughts (a horde that keeps coming until a button is pressed) are rebuilt with `director_panic_forever` by relays named `l4d1_onslaught_on` / `l4d1_onslaught_off`: while any tank is alive the endless horde is held off, and when the last tank dies it comes back with a fresh panic, unless the button was pressed meanwhile. See below. |
@@ -658,8 +658,11 @@ cheat cvar on L4D1.
 
 The server has its own switch: `m_Local.m_bDrawViewmodel`, which the client checks before it
 draws view models and for nothing else, so the HUD is untouched. `!noviewmodel` (or
-`!viewmodel`) toggles it for the player who types it, and the choice is kept in a client
-cookie. The game sets the flag back on by itself (entering ghost state, survivor cameras,
+`!viewmodel`) sets it for the player who types it: `1` hides, `0` shows, and `2` hides only
+the main (primary slot) weapon so pistols, pills, throwables and kits still draw. With no
+argument it toggles, back to whichever of 1 or 2 the player used last. The choice is kept
+in a client cookie. Players who bind it should bind the console command
+(`bind v "sm_noviewmodel 2"`); chat triggers in a bind run into SourceMod's chat flood limit. The game sets the flag back on by itself (entering ghost state, survivor cameras,
 bot replacement), so a 0.2 s timer re-hides it, and a weapon switch hook updates at once.
 The plugin only turns the flag back on when it was the one that turned it off, so the
 game's own hides (the death fall camera) are left alone.
