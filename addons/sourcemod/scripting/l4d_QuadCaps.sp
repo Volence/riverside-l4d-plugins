@@ -32,12 +32,18 @@ static bool:g_bLimitsOverridden = false;
 //    override, which ready-up then carried into go-live: the fake "boomer_limit 0" patches.
 //  - The limits are saved when the override is set and put back only if it is in place
 //    (riverside2 restored a per-map snapshot at every round_end, undoing mid-map changes).
-//  - The ban outlives the boomer's own respawn: another SI dying before the boomer's
-//    player has a new class lifts it only once he has one (else he could pick boomer again).
+// riverside5 (owner ruling 2026-10-26): the next SI death lifts the ban at once, as upstream. riverside3/4 held it
+// until the boomer's player had a new class, so a boomer that died BEFORE the last SI of its wave still banned
+// him from boomer: match 834 x1m3, boomer died 3rd and smoker last, and the next wave came out 3 hunters + smoker.
+// riverside6 (owner ruling 2026-10-28, forum thread "boomer die last"): smoker dies last = a dirty (hunters + exactly
+// one boomer), never a quad. Stock picks each player's least-played class, so smoker-last gave 3H+1B only ~55% of the
+// time and could give 4 hunters. A smoker death now bans smoker AND boomer (so stock deals hunters) until the next SI
+// death, as the boomer ban does, and the smoker's own player is switched to boomer when he next becomes a ghost.
+// If he leaves the team before that, the boomer limit goes back so stock can still deal one boomer.
 static bool:g_bHalfLive = false;
 static g_iSavedSmokerLimit, g_iSavedBoomerLimit;
-static g_iBoomerUid;			// player whose boomer death set the ban, 0 if none or a bot
-static bool:g_bLiftPending;	// another SI died while g_iBoomerUid had no new class yet
+static g_iDirtyUserid;	// riverside6: the smoker's player who is owed the boomer, 0 = none
+new Handle:hCvarDirtyAfterSmoker;
 new Handle:HCVAR_Z_VS_SMOKER_LIMIT;
 new Handle:HCVAR_Z_VS_BOOMER_LIMIT;
 new Handle:HCVAR_Z_HUNTER_LIMIT;
@@ -56,7 +62,7 @@ public Plugin:myinfo =
 	name = "L4D Quad Caps Control",
 	author = "Harry Potter",
 	description = "As the name says, you dumb fuck",
-	version = "1.5-riverside4",
+	version = "1.5-riverside6",
 	url = "http://steamcommunity.com/profiles/76561198026784913"
 }
 
@@ -122,11 +128,13 @@ public OnPluginStart()
 	HookEvent("finale_win", Event_RoundEnd);
 	HookEvent("player_death", Event_PlayerDeath,	EventHookMode_Post);	// riverside3: it reads userid, NoCopy only worked by luck
 	HookEvent("player_left_start_area", LeftStartAreaEvent, EventHookMode_PostNoCopy);
+	HookEvent("player_team", Event_PlayerTeam);
 	
 	HCVAR_Z_VS_SMOKER_LIMIT = FindConVar("z_versus_smoker_limit");
 	HCVAR_Z_VS_BOOMER_LIMIT = FindConVar("z_versus_boomer_limit");
 	HCVAR_Z_HUNTER_LIMIT = FindConVar("z_hunter_limit");
 	hCvar3HT1SProbability = CreateConVar("sm_3ht1s_percent_chance", "90", "X% chance of 3+1 and 100-X% remaining chance of 4ht after Boomer dies", FCVAR_NOTIFY, true, 0.0,true, 100.0);
+	hCvarDirtyAfterSmoker = CreateConVar("sm_dirty_after_smoker", "1", "1 = smoker dies last gives hunters + exactly one boomer (the smoker's player)", FCVAR_NOTIFY, true, 0.0, true, 1.0);
 	
 	CVAR_Z_VS_SMOKER_LIMIT_ORIGINAL = GetConVarInt(HCVAR_Z_VS_SMOKER_LIMIT);
 	CVAR_Z_VS_BOOMER_LIMIT_ORIGINAL = GetConVarInt(HCVAR_Z_VS_BOOMER_LIMIT);
@@ -234,14 +242,6 @@ public void Event_RoundStart(Event event, const char[] name, bool dontBroadcast)
 
 public void Event_PlayerSpawn(Event event, const char[] name, bool dontBroadcast)
 { 
-	// riverside4: a dead boomer's player who wins the tank never enters the ghost state, so
-	// riverside3 held the ban (hunters only) until the tank died and he ghosted again (match 710)
-	if (g_iBoomerUid != 0 && event.GetInt("userid") == g_iBoomerUid)
-	{
-		int client = GetClientOfUserId(g_iBoomerUid);
-		if (client && IsClientInGame(client) && BoomerHasNewClass()) BoomerGotNewClass();
-	}
-
 	if( g_iPlayerSpawn == 0 && g_iRoundStart == 1 )
 		CreateTimer(0.25, PluginStart);
 	g_iPlayerSpawn = 1;
@@ -295,15 +295,15 @@ public Action:Event_PlayerDeath(Handle:event, const String:name[], bool:dontBroa
 	
 	if(GetClientTeam(client) == TEAM_INFECTED)
 	{
-		if(GetEntProp(client, Prop_Send, "m_zombieClass") == ZC_BOOMER)
+		new zombieclass = GetEntProp(client, Prop_Send, "m_zombieClass");
+		if(zombieclass == ZC_BOOMER)
 		{
 			if (!g_bLimitsOverridden)
 			{
 				g_iSavedSmokerLimit = GetConVarInt(HCVAR_Z_VS_SMOKER_LIMIT);
 				g_iSavedBoomerLimit = GetConVarInt(HCVAR_Z_VS_BOOMER_LIMIT);
 			}
-			g_iBoomerUid = IsFakeClient(client) ? 0 : GetClientUserId(client);
-			g_bLiftPending = false;
+			g_iDirtyUserid = 0;
 			new random = GetRandomInt(1, 100)
 			if (random <=Cvar3HT1SProbability)
 			{
@@ -320,28 +320,32 @@ public Action:Event_PlayerDeath(Handle:event, const String:name[], bool:dontBroa
 				Sub_DebugPrint("No Boomer and Smoker");
 			}
 		}
-		else if (g_bLimitsOverridden)
+		else
 		{
-			if (BoomerHasNewClass())
+			if (g_bLimitsOverridden)
 			{
 				RestoreLimits();
 				Sub_DebugPrint("Boomer and Smoker limit reset");
 			}
-			else
+			// riverside6: smoker dies last = dirty
+			if (zombieclass == ZC_SMOKER && GetConVarBool(hCvarDirtyAfterSmoker))
 			{
-				g_bLiftPending = true;	// lifted when the boomer's player gets his next class
-				Sub_DebugPrint("Boomer and Smoker limit reset waits for the boomer's respawn");
+				g_iSavedSmokerLimit = GetConVarInt(HCVAR_Z_VS_SMOKER_LIMIT);
+				g_iSavedBoomerLimit = GetConVarInt(HCVAR_Z_VS_BOOMER_LIMIT);
+				SetConVarInt(HCVAR_Z_VS_SMOKER_LIMIT, 0);
+				SetConVarInt(HCVAR_Z_VS_BOOMER_LIMIT, 0);
+				g_bLimitsOverridden = true;
+				g_iDirtyUserid = GetClientUserId(client);
+				Sub_DebugPrint("Dirty: %N is owed the boomer", client);
 			}
-		}	
+		}
 	}
 }
 
 public L4D_OnEnterGhostState(client)
 {
-	// riverside3: the boomer's player now has his next class (CTerrorPlayer::Spawn picks it
-	// before the ghost state is entered), so a waiting lift can go ahead
-	if (g_iBoomerUid != 0 && GetClientUserId(client) == g_iBoomerUid)
-		BoomerGotNewClass();
+	if(g_iDirtyUserid && GetClientUserId(client) == g_iDirtyUserid)
+		CreateTimer(OnEnterGhostCheckDelay, Timer_DirtyBoomer, g_iDirtyUserid); // after Spawn has picked his class
 
 	if(!InSecondHalfOfRound())
 	{
@@ -351,6 +355,44 @@ public L4D_OnEnterGhostState(client)
 	Sub_DebugPrint("%N: OnEnterGhostState %s",client,TEAM_CLASS(GetEntProp(client, Prop_Send, "m_zombieClass")));
 	
 	CreateTimer(OnEnterGhostCheckDelay,COLD_DOWN, GetClientUserId(client) ); // delay check since team change event is before round start event
+}
+
+// riverside6: the smoker's player becomes the wave's one boomer. The limits stay at 0 until the next SI death, so nobody
+// else can be dealt a boomer meanwhile.
+public Action Timer_DirtyBoomer(Handle timer, int userid)
+{
+	if(userid != g_iDirtyUserid) return Plugin_Continue;
+	int client = GetClientOfUserId(userid);
+	if(!client || !IsClientInGame(client) || GetClientTeam(client) != TEAM_INFECTED || !IsPlayerGhost(client)) return Plugin_Continue;
+	g_iDirtyUserid = 0;
+
+	int zombieclass = GetEntProp(client, Prop_Send, "m_zombieClass");
+	if(zombieclass == ZC_BOOMER || zombieclass == ZC_TANK) return Plugin_Continue;
+
+	// Spawn counted this life as zombieclass; count it as the boomer it is, so stock rotation stays fair
+	SetEntProp(client, Prop_Send, "m_classSpawnCount", GetEntProp(client, Prop_Send, "m_classSpawnCount", 4, zombieclass) - 1, 4, zombieclass);
+	SetEntProp(client, Prop_Send, "m_classSpawnCount", GetEntProp(client, Prop_Send, "m_classSpawnCount", 4, ZC_BOOMER) + 1, 4, ZC_BOOMER);
+	ChangeGhostClass(client, ZC_BOOMER);
+	Sub_DebugPrint("Dirty: %N changed to Boomer", client);
+	return Plugin_Continue;
+}
+
+// riverside6: the owed player left the infected team before his ghost, so let stock deal the boomer instead
+void DirtyPlayerGone(int userid)
+{
+	if(!g_iDirtyUserid || userid != g_iDirtyUserid) return;
+	g_iDirtyUserid = 0;
+	SetConVarInt(HCVAR_Z_VS_BOOMER_LIMIT, g_iSavedBoomerLimit);
+}
+
+public void OnClientDisconnect(int client)
+{
+	if(IsClientInGame(client)) DirtyPlayerGone(GetClientUserId(client));
+}
+
+public void Event_PlayerTeam(Event event, const char[] name, bool dontBroadcast)
+{
+	if(event.GetInt("team") != TEAM_INFECTED) DirtyPlayerGone(event.GetInt("userid"));
 }
 
 public Action COLD_DOWN(Handle timer, int userid)
@@ -423,19 +465,24 @@ public void Sub_DetermineClass(int Client)
 		
 		if(NeedChange > 0)
 		{
-			decl WeaponIndex;
-			while ((WeaponIndex = GetPlayerWeaponSlot(Client, 0)) != -1)
-			{
-				RemovePlayerItem(Client, WeaponIndex);
-				RemoveEdict(WeaponIndex);
-			}
-			SDKCall(g_hSetClass, Client, NeedChange);
-			AcceptEntityInput(MakeCompatEntRef(GetEntProp(Client, Prop_Send, "m_customAbility")), "Kill");
-			SetEntProp(Client, Prop_Send, "m_customAbility", GetEntData(SDKCall(g_hCreateAbility, Client), g_oAbility));
+			ChangeGhostClass(Client, NeedChange);
 			Sub_DebugPrint("H: %d, S:%d, B:%d, %N has changed to %s",Hunter_Now_Line,Smoker_Now_Line,Boomer_Now_Line,Client,TEAM_CLASS(GetEntProp(Client, Prop_Send, "m_zombieClass")));
 		}
 	}
 	return;
+}
+
+void ChangeGhostClass(int Client, int NewClass)
+{
+	decl WeaponIndex;
+	while ((WeaponIndex = GetPlayerWeaponSlot(Client, 0)) != -1)
+	{
+		RemovePlayerItem(Client, WeaponIndex);
+		RemoveEdict(WeaponIndex);
+	}
+	SDKCall(g_hSetClass, Client, NewClass);
+	AcceptEntityInput(MakeCompatEntRef(GetEntProp(Client, Prop_Send, "m_customAbility")), "Kill");
+	SetEntProp(Client, Prop_Send, "m_customAbility", GetEntData(SDKCall(g_hCreateAbility, Client), g_oAbility));
 }
 
 public Action:KeepSIStarting(Handle:timer,any:client)
@@ -499,8 +546,7 @@ SetConvarDefault()
 	SetConVarInt(HCVAR_Z_VS_SMOKER_LIMIT, CVAR_Z_VS_SMOKER_LIMIT_ORIGINAL);
 	SetConVarInt(HCVAR_Z_VS_BOOMER_LIMIT, CVAR_Z_VS_BOOMER_LIMIT_ORIGINAL);
 	g_bLimitsOverridden = false;
-	g_iBoomerUid = 0;
-	g_bLiftPending = false;
+	g_iDirtyUserid = 0;
 }
 
 // riverside3: put back the values the override replaced
@@ -509,25 +555,7 @@ void RestoreLimits()
 	SetConVarInt(HCVAR_Z_VS_SMOKER_LIMIT, g_iSavedSmokerLimit);
 	SetConVarInt(HCVAR_Z_VS_BOOMER_LIMIT, g_iSavedBoomerLimit);
 	g_bLimitsOverridden = false;
-	g_iBoomerUid = 0;
-	g_bLiftPending = false;
-}
-
-// the boomer's player already has his next class, left, or was a bot
-bool BoomerHasNewClass()
-{
-	if (g_iBoomerUid == 0) return true;
-	new c = GetClientOfUserId(g_iBoomerUid);
-	if (c == 0 || !IsClientInGame(c) || GetClientTeam(c) != TEAM_INFECTED) return true;
-	// riverside4: alive as anything but a boomer (the tank, or a ghost of his next class)
-	return IsPlayerAlive(c) && GetEntProp(c, Prop_Send, "m_zombieClass") != ZC_BOOMER;
-}
-
-void BoomerGotNewClass()
-{
-	g_iBoomerUid = 0;
-	if (g_bLiftPending && g_bLimitsOverridden) RestoreLimits();
-	g_bLiftPending = false;
+	g_iDirtyUserid = 0;
 }
 
 bool:InSecondHalfOfRound()
