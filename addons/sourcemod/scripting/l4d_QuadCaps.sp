@@ -44,6 +44,11 @@ static bool:g_bHalfLive = false;
 static g_iSavedSmokerLimit, g_iSavedBoomerLimit;
 static g_iDirtyUserid;	// riverside6: the smoker's player who is owed the boomer, 0 = none
 new Handle:hCvarDirtyAfterSmoker;
+// riverside7 (owner ruling 2026-10-28): hunter dies last = stock classes, but never a quad. Stock can still deal 3 hunters +
+// smoker (or 4 hunters) there. Until the next SI death, each new ghost checks the team: once nobody is left waiting to
+// respawn and the living team (ghosts included) still has no boomer, that last ghost is switched to boomer.
+static bool:g_bNoQuadPending = false;
+new Handle:hCvarNoQuadAfterHunter;
 new Handle:HCVAR_Z_VS_SMOKER_LIMIT;
 new Handle:HCVAR_Z_VS_BOOMER_LIMIT;
 new Handle:HCVAR_Z_HUNTER_LIMIT;
@@ -62,7 +67,7 @@ public Plugin:myinfo =
 	name = "L4D Quad Caps Control",
 	author = "Harry Potter",
 	description = "As the name says, you dumb fuck",
-	version = "1.5-riverside6",
+	version = "1.5-riverside7",
 	url = "http://steamcommunity.com/profiles/76561198026784913"
 }
 
@@ -135,6 +140,7 @@ public OnPluginStart()
 	HCVAR_Z_HUNTER_LIMIT = FindConVar("z_hunter_limit");
 	hCvar3HT1SProbability = CreateConVar("sm_3ht1s_percent_chance", "90", "X% chance of 3+1 and 100-X% remaining chance of 4ht after Boomer dies", FCVAR_NOTIFY, true, 0.0,true, 100.0);
 	hCvarDirtyAfterSmoker = CreateConVar("sm_dirty_after_smoker", "1", "1 = smoker dies last gives hunters + exactly one boomer (the smoker's player)", FCVAR_NOTIFY, true, 0.0, true, 1.0);
+	hCvarNoQuadAfterHunter = CreateConVar("sm_noquad_after_hunter", "1", "1 = hunter dies last never gives a quad (the last ghost of the wave becomes the boomer if nobody else is one)", FCVAR_NOTIFY, true, 0.0, true, 1.0);
 	
 	CVAR_Z_VS_SMOKER_LIMIT_ORIGINAL = GetConVarInt(HCVAR_Z_VS_SMOKER_LIMIT);
 	CVAR_Z_VS_BOOMER_LIMIT_ORIGINAL = GetConVarInt(HCVAR_Z_VS_BOOMER_LIMIT);
@@ -296,6 +302,7 @@ public Action:Event_PlayerDeath(Handle:event, const String:name[], bool:dontBroa
 	if(GetClientTeam(client) == TEAM_INFECTED)
 	{
 		new zombieclass = GetEntProp(client, Prop_Send, "m_zombieClass");
+		g_bNoQuadPending = false;
 		if(zombieclass == ZC_BOOMER)
 		{
 			if (!g_bLimitsOverridden)
@@ -338,6 +345,12 @@ public Action:Event_PlayerDeath(Handle:event, const String:name[], bool:dontBroa
 				g_iDirtyUserid = GetClientUserId(client);
 				Sub_DebugPrint("Dirty: %N is owed the boomer", client);
 			}
+			// riverside7: hunter dies last = no quad
+			else if (zombieclass == ZC_HUNTER && GetConVarBool(hCvarNoQuadAfterHunter))
+			{
+				g_bNoQuadPending = true;
+				Sub_DebugPrint("No quad: hunter died last");
+			}
 		}
 	}
 }
@@ -346,6 +359,8 @@ public L4D_OnEnterGhostState(client)
 {
 	if(g_iDirtyUserid && GetClientUserId(client) == g_iDirtyUserid)
 		CreateTimer(OnEnterGhostCheckDelay, Timer_DirtyBoomer, g_iDirtyUserid); // after Spawn has picked his class
+	if(g_bNoQuadPending)
+		CreateTimer(OnEnterGhostCheckDelay, Timer_NoQuadCheck, GetClientUserId(client));
 
 	if(!InSecondHalfOfRound())
 	{
@@ -374,6 +389,44 @@ public Action Timer_DirtyBoomer(Handle timer, int userid)
 	SetEntProp(client, Prop_Send, "m_classSpawnCount", GetEntProp(client, Prop_Send, "m_classSpawnCount", 4, ZC_BOOMER) + 1, 4, ZC_BOOMER);
 	ChangeGhostClass(client, ZC_BOOMER);
 	Sub_DebugPrint("Dirty: %N changed to Boomer", client);
+	return Plugin_Continue;
+}
+
+// riverside7: hunter died last. Waits until this ghost is the last of the wave, then makes sure it holds a boomer.
+public Action Timer_NoQuadCheck(Handle timer, int userid)
+{
+	if(!g_bNoQuadPending) return Plugin_Continue;
+	int client = GetClientOfUserId(userid);
+	if(!client || !IsClientInGame(client) || GetClientTeam(client) != TEAM_INFECTED || !IsPlayerGhost(client)) return Plugin_Continue;
+
+	bool bBoomer = false;
+	int iWaiting = 0;
+	for(int i = 1; i <= MaxClients; i++)
+	{
+		if(!IsClientInGame(i) || GetClientTeam(i) != TEAM_INFECTED) continue;
+		if(IsPlayerAlive(i))
+		{
+			if(GetEntProp(i, Prop_Send, "m_zombieClass") == ZC_BOOMER) bBoomer = true;
+		}
+		else if(!IsFakeClient(i))
+			iWaiting++;	// dead and still to respawn
+	}
+
+	if(bBoomer)
+	{
+		g_bNoQuadPending = false;	// the wave already has its boomer
+		return Plugin_Continue;
+	}
+	if(iWaiting > 0) return Plugin_Continue;	// a later ghost may still be dealt one
+
+	g_bNoQuadPending = false;
+	int zombieclass = GetEntProp(client, Prop_Send, "m_zombieClass");
+	if(zombieclass == ZC_TANK) return Plugin_Continue;
+
+	SetEntProp(client, Prop_Send, "m_classSpawnCount", GetEntProp(client, Prop_Send, "m_classSpawnCount", 4, zombieclass) - 1, 4, zombieclass);
+	SetEntProp(client, Prop_Send, "m_classSpawnCount", GetEntProp(client, Prop_Send, "m_classSpawnCount", 4, ZC_BOOMER) + 1, 4, ZC_BOOMER);
+	ChangeGhostClass(client, ZC_BOOMER);
+	Sub_DebugPrint("No quad: %N changed to Boomer", client);
 	return Plugin_Continue;
 }
 
@@ -547,6 +600,7 @@ SetConvarDefault()
 	SetConVarInt(HCVAR_Z_VS_BOOMER_LIMIT, CVAR_Z_VS_BOOMER_LIMIT_ORIGINAL);
 	g_bLimitsOverridden = false;
 	g_iDirtyUserid = 0;
+	g_bNoQuadPending = false;
 }
 
 // riverside3: put back the values the override replaced
@@ -556,6 +610,7 @@ void RestoreLimits()
 	SetConVarInt(HCVAR_Z_VS_BOOMER_LIMIT, g_iSavedBoomerLimit);
 	g_bLimitsOverridden = false;
 	g_iDirtyUserid = 0;
+	g_bNoQuadPending = false;
 }
 
 bool:InSecondHalfOfRound()
