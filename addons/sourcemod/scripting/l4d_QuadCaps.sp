@@ -49,6 +49,9 @@ new Handle:hCvarDirtyAfterSmoker;
 // respawn and the living team (ghosts included) still has no boomer, that last ghost is switched to boomer.
 static bool:g_bNoQuadPending = false;
 new Handle:hCvarNoQuadAfterHunter;
+// riverside8 (2026-10-28, live report of two boomers): riverside6 fired on ANY smoker death, so a smoker dying while the
+// last wave's boomer was still up switched his player to a second boomer. Dirty now needs no other living boomer, both
+// at the smoker's death and again when his ghost is switched.
 new Handle:HCVAR_Z_VS_SMOKER_LIMIT;
 new Handle:HCVAR_Z_VS_BOOMER_LIMIT;
 new Handle:HCVAR_Z_HUNTER_LIMIT;
@@ -67,7 +70,7 @@ public Plugin:myinfo =
 	name = "L4D Quad Caps Control",
 	author = "Harry Potter",
 	description = "As the name says, you dumb fuck",
-	version = "1.5-riverside7",
+	version = "1.5-riverside8",
 	url = "http://steamcommunity.com/profiles/76561198026784913"
 }
 
@@ -335,7 +338,7 @@ public Action:Event_PlayerDeath(Handle:event, const String:name[], bool:dontBroa
 				Sub_DebugPrint("Boomer and Smoker limit reset");
 			}
 			// riverside6: smoker dies last = dirty
-			if (zombieclass == ZC_SMOKER && GetConVarBool(hCvarDirtyAfterSmoker))
+			if (zombieclass == ZC_SMOKER && GetConVarBool(hCvarDirtyAfterSmoker) && !OtherBoomerAlive(client))
 			{
 				g_iSavedSmokerLimit = GetConVarInt(HCVAR_Z_VS_SMOKER_LIMIT);
 				g_iSavedBoomerLimit = GetConVarInt(HCVAR_Z_VS_BOOMER_LIMIT);
@@ -383,6 +386,7 @@ public Action Timer_DirtyBoomer(Handle timer, int userid)
 
 	int zombieclass = GetEntProp(client, Prop_Send, "m_zombieClass");
 	if(zombieclass == ZC_BOOMER || zombieclass == ZC_TANK) return Plugin_Continue;
+	if(OtherBoomerAlive(client)) return Plugin_Continue;	// riverside8: the wave already has its boomer
 
 	// Spawn counted this life as zombieclass; count it as the boomer it is, so stock rotation stays fair
 	SetEntProp(client, Prop_Send, "m_classSpawnCount", GetEntProp(client, Prop_Send, "m_classSpawnCount", 4, zombieclass) - 1, 4, zombieclass);
@@ -428,6 +432,17 @@ public Action Timer_NoQuadCheck(Handle timer, int userid)
 	ChangeGhostClass(client, ZC_BOOMER);
 	Sub_DebugPrint("No quad: %N changed to Boomer", client);
 	return Plugin_Continue;
+}
+
+// riverside8: a living infected boomer (ghosts included) other than except
+bool OtherBoomerAlive(int except)
+{
+	for(int i = 1; i <= MaxClients; i++)
+	{
+		if(i == except || !IsClientInGame(i) || GetClientTeam(i) != TEAM_INFECTED || !IsPlayerAlive(i)) continue;
+		if(GetEntProp(i, Prop_Send, "m_zombieClass") == ZC_BOOMER) return true;
+	}
+	return false;
 }
 
 // riverside6: the owed player left the infected team before his ghost, so let stock deal the boomer instead
