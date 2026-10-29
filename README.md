@@ -39,6 +39,7 @@ Each plugin ships as source (`addons/sourcemod/scripting`) and compiled
 | `l4d_rcon_abort_fix` | 1.0 | DHooks, gamedata `l4d_rcon_abort_fix.games.txt` (Linux) | An RCON connection closing no longer strands another connection's command: no more "rcon exec timeout" when two rcon tools share a server, and no command running twice. Engine bug, see below. |
 | `l4d_rcon_password_fix` | 1.0 | DHooks, gamedata `l4d_rcon_password_fix.games.txt` (Linux) | Setting `rcon_password` to the value it already has (every map change, if a cfg sets it) no longer closes every RCON connection. A real change still does. See below. |
 | `l4d_onslaught_tank_pause` | 1.0 | | For converted L4D2 maps whose onslaughts (a horde that keeps coming until a button is pressed) are rebuilt with `director_panic_forever` by relays named `l4d1_onslaught_on` / `l4d1_onslaught_off`: while any tank is alive the endless horde is held off, and when the last tank dies it comes back with a fresh panic, unless the button was pressed meanwhile. See below. |
+| `l4d_pillar_rubble_cleanup` | 1.0 | | Once no tank is alive, deletes the loose chunks a tank leaves when it breaks a concrete pillar (No Mercy 2, Milltown), which otherwise stay solid for the rest of the round. The stump stays. See below. |
 
 ## Fixed forks of existing plugins
 
@@ -738,6 +739,21 @@ standing tank is left (checked 0.5 s after a death or disconnect) it sets 1 agai
 a `PanicEvent`, unless `l4d1_onslaught_off` fired in the meantime. An onslaught that starts
 with a tank already up waits for the tank the same way. It does nothing on maps without
 those relays, and it does not touch finale gauntlets.
+
+## Pillar rubble cleanup
+
+`models/props_interiors/concretepillar01.mdl` (48 of them on No Mercy 2, more on Milltown)
+can only be broken by a tank. Its break list spawns five server-side pieces: the stump with
+rebar, which does not move, and four loose chunks marked `debris 0` (they collide with
+players) and `fadetime 0` (they never fade). So the chunks a tank leaves on the floor stay
+solid for the rest of the round, and survivors coming through later can get caught on them
+(ours got caught on them right next to the witch).
+
+Two seconds after a tank dies (so passing the tank to another player does not count), if no
+tank is alive, the plugin deletes every loose chunk. The stump stays, so the room still shows
+the fight. With two tanks up, nothing goes until the second one is dead. Each cleanup is
+logged to `logs/pillar_rubble.log`; `sm_pillar_rubble_count` prints how many chunks exist.
+`l4d_pillar_rubble_cleanup 0` turns it off, `l4d_pillar_rubble_delay` sets the wait.
 
 ## Tools
 
