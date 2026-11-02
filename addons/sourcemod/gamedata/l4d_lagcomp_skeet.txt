@@ -79,6 +79,11 @@
 				"linux"			"40"
 				"windows"		"40"
 			}
+			"CTakeDamageInfo::m_flDamage"
+			{
+				"linux"			"44"
+				"windows"		"44"
+			}
 		}
 
 		"Signatures"

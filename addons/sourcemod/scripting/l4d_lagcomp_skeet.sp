@@ -5,7 +5,7 @@
 #include <sdkhooks>
 #include <dhooks>
 
-#define PLUGIN_VERSION "1.4-riverside4"
+#define PLUGIN_VERSION "1.4-riverside5"
 
 public Plugin myinfo =
 {
@@ -41,6 +41,7 @@ methodmap CUserCmd
 int g_iOffs_m_pCurrentPlayer;
 int g_iOffs_m_isCurrentlyDoingCompensation;
 int g_iOffs_CTakeDamageInfo_m_hAttacker;
+int g_iOffs_CTakeDamageInfo_m_flDamage;
 methodmap CLagCompensationManager
 {
 	property Address m_pCurrentPlayer {
@@ -87,6 +88,7 @@ methodmap GameDataWrapper < GameData {
 }
 
 GlobalForward g_fwdPounceRewound;
+ConVar g_hCvarFalloffStart, g_hCvarFalloffEnd, g_hCvarFalloffScale;
 
 public void OnPluginStart()
 {
@@ -97,10 +99,15 @@ public void OnPluginStart()
 	// riverside1: was hardcoded 52, the L4D2 layout. On L4D1 offset 52 is m_flBaseDamage (a
 	// float), so the attacker lookup failed on every hit and the plugin never did anything.
 	g_iOffs_CTakeDamageInfo_m_hAttacker = gd.GetOffset("CTakeDamageInfo::m_hAttacker");
+	g_iOffs_CTakeDamageInfo_m_flDamage = gd.Super.GetOffset("CTakeDamageInfo::m_flDamage"); // L4D1 only, -1 keeps the falloff off
 	delete gd.CreateDetourOrFail("CTerrorPlayer::OnTakeDamageInternal", DTR_OnTakeDamageInternal, DTR_OnTakeDamageInternal_Post);
 	delete gd;
 
 	g_fwdPounceRewound = new GlobalForward("L4D_OnLagCompPounce", ET_Ignore, Param_Cell, Param_Cell, Param_Cell);
+
+	g_hCvarFalloffStart = CreateConVar("l4d_lagcomp_skeet_falloff_start", "0", "Shotgun damage to a pouncing hunter starts falling off at this distance. 0 = off.", _, true, 0.0);
+	g_hCvarFalloffEnd = CreateConVar("l4d_lagcomp_skeet_falloff_end", "700", "Distance where the falloff reaches its full scale and stays there.", _, true, 0.0);
+	g_hCvarFalloffScale = CreateConVar("l4d_lagcomp_skeet_falloff_scale", "0.6", "Damage multiplier at the end distance and beyond.", _, true, 0.0, true, 1.0);
 }
 
 // riverside3: tell skill_detect what we decided. It reads m_isAttemptingToPounce in TraceAttack,
@@ -193,7 +200,46 @@ MRESReturn DTR_OnTakeDamageInternal(int victim, DHookParam hParams)
 		}
 	}
 
+	if (GetEntProp(victim, Prop_Send, "m_isAttemptingToPounce"))
+		ApplySkeetFalloff(victim, attacker, hParams);
+
 	return MRES_Ignored;
+}
+
+// riverside5: long range skeets (owner 2026-11-02). The weapon's own falloff is shared by every
+// target and every distance, so steepening it would also cost the 200-400 unit skeets. This only
+// scales shotgun damage to a pouncing hunter, past the start distance. Runs on the outermost call
+// only: the nested TakeDamage() that kills a skeeted hunter must keep its damage + health. Lag
+// compensation is active here, so the hunter is where the shooter saw him.
+void ApplySkeetFalloff(int victim, int attacker, DHookParam hParams)
+{
+	float flStart = g_hCvarFalloffStart.FloatValue;
+	if (flStart <= 0.0 || g_iOffs_CTakeDamageInfo_m_flDamage == -1)
+		return;
+
+	int weapon = GetEntPropEnt(attacker, Prop_Send, "m_hActiveWeapon");
+	if (weapon == -1)
+		return;
+
+	char cls[64];
+	GetEdictClassname(weapon, cls, sizeof(cls));
+	if (strcmp(cls, "weapon_pumpshotgun") != 0 && strcmp(cls, "weapon_autoshotgun") != 0)
+		return;
+
+	float vecAttacker[3], vecVictim[3];
+	GetClientEyePosition(attacker, vecAttacker);
+	GetClientAbsOrigin(victim, vecVictim);
+
+	float flDistance = GetVectorDistance(vecAttacker, vecVictim);
+	if (flDistance <= flStart)
+		return;
+
+	float flEnd = g_hCvarFalloffEnd.FloatValue;
+	float flRamp = flEnd > flStart ? Math_Clamp((flDistance - flStart) / (flEnd - flStart), 0.0, 1.0) : 1.0;
+	float flScale = 1.0 + (g_hCvarFalloffScale.FloatValue - 1.0) * flRamp;
+
+	float flDamage = hParams.GetObjectVar(1, g_iOffs_CTakeDamageInfo_m_flDamage, ObjectValueType_Float);
+	hParams.SetObjectVar(1, g_iOffs_CTakeDamageInfo_m_flDamage, ObjectValueType_Float, flDamage * flScale);
 }
 
 MRESReturn DTR_OnTakeDamageInternal_Post(int victim, DHookParam hParams)

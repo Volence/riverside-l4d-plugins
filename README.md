@@ -55,7 +55,7 @@ Rotoblin already ships (`Roto2-AZ_mod.phrases`), and build against the Rotoblin-
 | `l4d_collision_adjustments` | 1.3h-riverside1 | Upstream 1.3h (commons walk through weapons and items, survivors don't snag on infected ladders, and a hunter only passes through a downed survivor his hull already overlaps when the pounce starts, so an aimed pounce lands). riverside1: the hunter pass-through only applies to the hunter's own movement, so a downed survivor's shots still hit a pouncing hunter. Needs the CollisionHook extension, DHooks and the `l4d_no_m2_movement_block.txt` gamedata. See below. |
 | `l4d_tankpunchstuckfix` | 0.6-riverside6 | A survivor a tank punch leaves inside the ceiling or a wall is put back where he really was. Needs left4dhooks. See below. |
 | `l4d_infected_collisions` | riverside2 | Forgetest's plugin with one cvar per mover (riverside2: the witch setting now really applies to her, by detouring `ZombieBotLocomotion::DetectCollision`; `sm_infcoll_stats`): `l4d_infected_collisions_common` (1) lets commons walk through a pulled, choked or pounced survivor, `l4d_infected_collisions_witch` (0) keeps the witch colliding with him. Needs DHooks, gamedata `l4d_infected_collisions.txt`, and Forgetest's `gamedatawrapper` include. |
-| `l4d_lagcomp_skeet` | 1.4-riverside4 | Actually runs on L4D1 (the attacker offset was the L4D2 one), no longer crashes the server when a skeet ends a pounce, and tells stat plugins about the skeets it rescues. riverside4: a lunging hunter shot where the shooter saw him before the lunge takes stock skeet damage (it used to be stunned for 0.5 s instead). Needs DHooks. See below. |
+| `l4d_lagcomp_skeet` | 1.4-riverside5 | Actually runs on L4D1 (the attacker offset was the L4D2 one), no longer crashes the server when a skeet ends a pounce, and tells stat plugins about the skeets it rescues. riverside4: a lunging hunter shot where the shooter saw him before the lunge takes stock skeet damage (it used to be stunned for 0.5 s instead). riverside5: optional long range skeet falloff, off by default. Needs DHooks. See below. |
 | `l4dcompstats` | 1.0h-riverside4 | The `[TS]` skeet chat line only counts a hunter that was really in the air: one hit on the ground or a ladder is no longer a skeet (riverside3, the check runs before the damage, since by `player_death` the ground flag is already gone). riverside4: when `l4d_lagcomp_skeet` ruled on the killing shot, its answer wins, so a skeet it rescues prints in chat as well as counting in skill_detect. See below. |
 | `l4d_rock_lagcomp` | 1.14-riverside4 | Rock godframes count from the release, not the rock's creation (the tank holds it 1.2 to 1.7 s depending on the throw, so the old 1.7 s gave 0 to 0.5 s of real protection); default 0.2 s on every throw. A killing shot detonates inside that shot's usercmd, so the rock cannot still hit someone that tick; finale miniguns and .50 cals can destroy rocks again. |
 | `l4d_no_m2_movement_block` | 2.0-riverside2 | Forgetest's free movement while scratching. riverside2: plays the infected scratch growl (`*Zombie.Attack`) that the game no longer sees because of the zeroed claw timer, at the game's 0.2 s rate (`l4d_no_m2_movement_block_growl`, 1 on). Needs DHooks, gamedata `l4d_no_m2_movement_block.txt` and `l4d_no_m2_sounds.txt`. |
@@ -147,6 +147,14 @@ runs in `OnTakeDamage` pre, before lagcomp's detour, so a hunter the server had 
 between pellets printed nothing while skill_detect counted the skeet. riverside4
 implements the same forward and, when lagcomp ruled on the killing damage that tick,
 uses its answer at `player_death`. Without lagcomp it behaves as before.
+
+**Optional long range falloff (riverside5, off by default).** Shotgun hits on a pouncing
+hunter count less toward the pounce interrupt past a set distance, so far shots still hurt
+him but stop being skeets. His health loss is not scaled, and other weapons and targets are
+untouched. `l4d_lagcomp_skeet_falloff_start` (0 = off), `l4d_lagcomp_skeet_falloff_end`
+(default 700) and `l4d_lagcomp_skeet_falloff_scale` (default 0.6, reached at the end distance).
+We run start 450. The L4D1 Linux offset is checked against server.so; the Windows value in
+gamedata (`CTakeDamageInfo::m_flDamage`, 44) is untested, and L4D2 has none, so the falloff stays off there.
 
 ## The witch fixes
 
