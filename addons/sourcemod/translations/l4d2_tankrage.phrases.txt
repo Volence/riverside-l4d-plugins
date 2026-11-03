@@ -1,0 +1,13 @@
+"Phrases"
+{
+	"Tag"
+	{
+		"en"		"{red}[{default}Tank Rage{red}]{default}"
+	}
+	"SurvivorsRunBack"
+	{
+		"en"		"For every {green}%i units {default}the Survivors run back, the Tank's frustration is frozen for {green}%0.1f seconds{default}."
+		"zho"		"倖存者每回退 {green}%i 單位 {default}路程, Tank有 {green}%0.1f秒{default} 時間不會失去控制權."
+		"chi"		"生还者每回退 {green}%i 单位 {default}路程, 坦克有 {green}%0.1f秒{default} 时间不会失去控制权."
+	}
+}

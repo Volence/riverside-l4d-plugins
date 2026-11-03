@@ -62,6 +62,7 @@ Rotoblin already ships (`Roto2-AZ_mod.phrases`), and build against the Rotoblin-
 | `l4d_fix_common_shove` | 1.4.1-riverside2 | Forgetest's common shove fix, with the L4D1 falling activity, and a common is only skipped while it is falling AND off the ground (a grounded common stuck in the fall activity no longer stays frozen). |
 | `l4d_versus_rescue_door_fix` | 1.0-riverside2 | The rescue door unlock is written to the networked `m_bLocked`, so clients see it. |
 | `checkpoint-rage-control` | riverside2 | The "tank still loses rage" notice hooks the event the game really fires (`player_entered_checkpoint`) and checks the tank class (5 on L4D1). |
+| `l4d2_tankrage` | 1.0.2-riverside3 | Harry's L4D1 port of Sir's tank rage freeze. Survivors running back toward the tank freeze its frustration for 4 s per 840 units of flow, a fixed distance instead of a % of the map (7% was over 3000 units on a long map and a few hundred on a short one). A passed tank keeps the freeze. Needs left4dhooks, multicolors, `l4d_boss_percent` and `l4d_current_survivor_progress`, and the `l4d2_tankrage.phrases.txt` translation. See below. |
 | `l4d_QuadCaps` | 1.5-riverside8 | Boomer dies last: the next wave is a quad (90% 3 hunters + smoker, 10% 4 hunters). Smoker dies last: hunters + exactly one boomer, played by the smoker's player, never a quad (`sm_dirty_after_smoker`); riverside8: only when no other boomer is alive, so a smoker dying while the last wave's boomer lives no longer makes a second boomer. Hunter dies last: stock classes, but never a quad: if the wave's last ghost finds no boomer on the team, it becomes the boomer (`sm_noquad_after_hunter`). Any next SI death ends the rule. Also fixes upstream's `z_versus_boomer_limit 0` left behind by a boomer killed between halves. |
 | `l4d2_witch_crown_fix` | 1.2-riverside1 | A pump blast the fix counts as a crown now always kills. The old top-up to exactly `z_witch_health` could leave her on 1 HP. See below. |
 | `l4d_tank_witch_damage_announce_spawnAnnouncer` | 2.1-riverside2 | The tank damage chat printout keeps the first holder's damage after a frustration pass. Upstream forgot the old holder as soon as the frustrated tank took a hit during the 3 s pass lottery, so the report listed only damage to the new holder and the percentages summed to well under 100%. The hand-off now also adds instead of overwriting, so the duplicate `tank_frustrated` cannot wipe a total. |
@@ -762,6 +763,25 @@ tank is alive, the plugin deletes every loose chunk. The stump stays, so the roo
 the fight. With two tanks up, nothing goes until the second one is dead. Each cleanup is
 logged to `logs/pillar_rubble.log`; `sm_pillar_rubble_count` prints how many chunks exist.
 `l4d_pillar_rubble_cleanup 0` turns it off, `l4d_pillar_rubble_delay` sets the wait.
+
+## Tank rage run-back freeze
+
+The plugin watches how far the survivors' flow moves back toward where they were when the
+tank spawned. Every `l4d2_tankrage_distance` units (840) they run back adds
+`l4d2_tankrage_freezetime` seconds (4.0) to the tank's frustration grace, so the tank does not
+lose control while it chases survivors who retreat. Upstream measures the run-back as
+`l4d2_tankrage_flowpercent` of the map's flow, which made the same rule mean very different
+distances on different maps. 840 units is how far a versus tank (`z_tank_speed_vs` 210) walks
+in the 4 s freeze. Only human tanks are tracked, and finale tanks never are.
+
+Changes from Harry's port:
+- riverside1: the spawn point and the survivors' position are compared as true survivor flow,
+  so `versus_boss_buffer` is not counted twice.
+- riverside2: a passed tank is tracked (upstream followed the old player, so the freeze stopped
+  at the first pass), and a pass only carries the timer of the tank it was started for. A second
+  tank, a finale tank or an AI tank a human takes over goes through the same checks as a spawn.
+- riverside3: a fixed distance in units replaces the % of the map. The chat line says
+  "For every 840 units the Survivors run back...".
 
 ## Tools
 
