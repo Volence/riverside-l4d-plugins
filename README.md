@@ -41,6 +41,7 @@ Each plugin ships as source (`addons/sourcemod/scripting`) and compiled
 | `l4d_onslaught_tank_pause` | 1.0 | | For converted L4D2 maps whose onslaughts (a horde that keeps coming until a button is pressed) are rebuilt with `director_panic_forever` by relays named `l4d1_onslaught_on` / `l4d1_onslaught_off`: while any tank is alive the endless horde is held off, and when the last tank dies it comes back with a fresh panic, unless the button was pressed meanwhile. See below. |
 | `l4d_pillar_rubble_cleanup` | 1.0 | | Once no tank is alive, deletes the loose chunks a tank leaves when it breaks a concrete pillar (No Mercy 2, Milltown), which otherwise stay solid for the rest of the round. The stump stays. See below. |
 | `l4d_nullmodel_guard` | 1.0 | sdkhooks | Closes a server crash on ported L4D2 maps: a brush entity with no model that spawns solid is made non-solid, so a trace through it can no longer crash the server. Each one is logged. See below. |
+| `l4d_hltv_addon_guard` | 1.0 | sdkhooks; SourceTV Manager for the join window | Stops a stock client watching SourceTV from crashing to desktop when it joins a game in progress (often the 4th map). Survivors' holstered-weapon models are switched off during ready-up and for 45 s after a SourceTV spectator connects. See below. |
 
 ## Fixed forks of existing plugins
 
@@ -814,6 +815,34 @@ written to the game log:
 The jukebox spawner's buttons show up there on every map with a jukebox: its author creates
 them with `solid 0`, and `func_button`'s spawn sets them back to BSP. The plugin restores what
 was intended.
+
+## SourceTV addon guard
+
+A stock L4D1 client watching SourceTV can crash to desktop at `client.dll+0x1EE8AF`, in
+`C_AddonProp::ComputeStencilState`. A `C_AddonProp` is the client-only model of a weapon a
+survivor carries but is not holding: the shotgun on the back, the pistol on the hip. On a SourceTV
+client, `C_HLTVCamera::FixupMovmentParents` resets every entity's move parent to its networked one
+after each packet. A client-only prop has none, so its owner handle becomes -1. `ShouldDraw` checks
+for that, but the fast-path model renderer still calls `ComputeStencilState` on a prop already in
+its list, and that function dereferences the NULL owner. Spectators saw it when they joined, or
+reconnected to, a game already in progress, mostly on the 4th map, and every reconnect crashed again
+until the map changed.
+
+The client builds these props from the networked `m_iAddonBits`, which `CCSPlayer::PostThink`
+recomputes every frame. While the guard is on, a `PostThinkPost` hook writes 0 over it, so no client
+creates the props; once it is off, the real bits are back on the next frame. It is on:
+
+- from map start until the survivors leave the saferoom (ready-up), on every map, because
+  spectators carried over reload the map with everyone else;
+- for `l4d_hltv_addon_guard_join_secs` seconds (default 45) after a SourceTV spectator connects.
+  This needs [SourceTV Manager](https://github.com/peace-maker/sourcetvmanager) for the
+  `SourceTV_OnSpectatorConnected` forward.
+
+Players do not see holstered weapons on survivors during those windows. Each switch is logged as an
+`HLTVADDON` line in SourceMod's log.
+
+On a test server running our full plugin set, a fresh stock spectator joining Dead Air 4 mid-round
+crashed in 9 of 12 joins without the plugin and in 0 of 6 with it.
 
 ## Tools
 
