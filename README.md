@@ -40,6 +40,7 @@ Each plugin ships as source (`addons/sourcemod/scripting`) and compiled
 | `l4d_rcon_password_fix` | 1.0 | DHooks, gamedata `l4d_rcon_password_fix.games.txt` (Linux) | Setting `rcon_password` to the value it already has (every map change, if a cfg sets it) no longer closes every RCON connection. A real change still does. See below. |
 | `l4d_onslaught_tank_pause` | 1.0 | | For converted L4D2 maps whose onslaughts (a horde that keeps coming until a button is pressed) are rebuilt with `director_panic_forever` by relays named `l4d1_onslaught_on` / `l4d1_onslaught_off`: while any tank is alive the endless horde is held off, and when the last tank dies it comes back with a fresh panic, unless the button was pressed meanwhile. See below. |
 | `l4d_pillar_rubble_cleanup` | 1.0 | | Once no tank is alive, deletes the loose chunks a tank leaves when it breaks a concrete pillar (No Mercy 2, Milltown), which otherwise stay solid for the rest of the round. The stump stays. See below. |
+| `l4d_nullmodel_guard` | 1.0 | sdkhooks | Closes a server crash on ported L4D2 maps: a brush entity with no model that spawns solid is made non-solid, so a trace through it can no longer crash the server. Each one is logged. See below. |
 
 ## Fixed forks of existing plugins
 
@@ -782,6 +783,37 @@ Changes from Harry's port:
   tank, a finale tank or an AI tank a human takes over goes through the same checks as a spawn.
 - riverside3: a fixed distance in units replaces the % of the map. The chat line says
   "For every 840 units the Survivors run back...".
+
+## Null model guard
+
+L4D1 crashes with SIGSEGV in `engine.so!CM_VCollideForModel` (`engine.so+0xAF6D5`, reading
+`model->type` at `+0x6c`) when a trace touches a solid brush entity that has no model. A
+`func_*` entity spawned without a `"model"` key gets model index 0 and a NULL model, yet
+`func_brush`, `func_rotating` and others still make themselves `SOLID_VPHYSICS` or `SOLID_BSP`
+unless a flag says otherwise. L4D2's engine checks for the NULL, so L4D2 maps and L4D2
+stripper configs carry these entities without anyone noticing, and they crash L4D1 the first
+time something traces through one: a common infected checking its path
+(`ChaseVictim::Update` -> `ILocomotion::IsPotentiallyTraversable` -> `TraceRay` ->
+`ClipRayToVPhysics` -> `CM_VCollideForModel`), a hull trace, a bullet.
+
+We hit it twice: Rotoblin's model-less `func_brush` LOS blockers on `c6m2_bedlam` (the same
+crash Harry hit on Dead Before Dawn; fixed upstream in Rotoblin-AZMod PR #12), and Haunted Forest 3, whose swinging lamp
+turns on two `func_rotating` pivots with no model (spawnflags 513, so solid). One hull trace
+through the pivot crashes a test server every time.
+
+At `SpawnPost` the plugin finds every entity with model index 0 and solid type BSP or VPHYSICS
+and gives it the keyvalue `"solid" "0"`. That goes through `CBaseEntity::KeyValue` ->
+`SetSolid(SOLID_NONE)`, which takes it out of the solid partition the traces walk; writing
+the netprop alone would leave it there. The common stripper pattern that spawns a model-less
+brush and then fires `AddOutput solid 2` with `mins`/`maxs` still works: the later output
+makes it a bounding box, and a box trace never reads the model. Each entity it changes is
+written to the game log:
+
+    NULLMODEL map=hf03_themansion class=func_rotating name="rot_lamp_main" origin=2287 300 96 solid=6 now=0
+
+The jukebox spawner's buttons show up there on every map with a jukebox: its author creates
+them with `solid 0`, and `func_button`'s spawn sets them back to BSP. The plugin restores what
+was intended.
 
 ## Tools
 
