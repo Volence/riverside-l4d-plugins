@@ -42,6 +42,7 @@ Each plugin ships as source (`addons/sourcemod/scripting`) and compiled
 | `l4d_pillar_rubble_cleanup` | 1.0 | | Once no tank is alive, deletes the loose chunks a tank leaves when it breaks a concrete pillar (No Mercy 2, Milltown), which otherwise stay solid for the rest of the round. The stump stays. See below. |
 | `l4d_nullmodel_guard` | 1.0 | sdkhooks | Closes a server crash on ported L4D2 maps: a brush entity with no model that spawns solid is made non-solid, so a trace through it can no longer crash the server. Each one is logged. See below. |
 | `l4d_hltv_addon_guard` | 1.0 | sdkhooks; SourceTV Manager for the join window | Stops a stock client watching SourceTV from crashing to desktop when it joins a game in progress (often the 4th map). Survivors' holstered-weapon models are switched off during ready-up and for 45 s after a SourceTV spectator connects. See below. |
+| `l4d_null_activator_guard` | 1.0 | DHooks (offset from SourceMod's own sdktools gamedata) | Closes a server crash when a map's queued filter input outlives the entity that triggered it: a `TestActivator` with no activator on the filters that read it without a check, and `game_ui` `Deactivate`, are dropped and logged. Based on GoD-Tony and blueblur's Fix Null Activator. See below. |
 
 ## Fixed forks of existing plugins
 
@@ -844,6 +845,39 @@ Players do not see holstered weapons on survivors during those windows. Each swi
 On a test server running our full plugin set, a fresh stock spectator joining Dead Air 4 mid-round
 crashed in 9 of 12 joins without the plugin and in 0 of 6 with it.
 
+## Null activator guard
+
+A map can send a filter `TestActivator` through the event queue: a trigger's `OnTrigger`
+output does it for whatever touched it. If that entity is deleted before the queued input runs,
+for example a common infected killed in a horde, the input arrives with a NULL activator. L4D1's
+stock `filter_activator_model`, `filter_activator_class`, `filter_activator_name`,
+`filter_activator_context` and `filter_activator_mass_greater` read the activator without a NULL
+check (and `filter_multi` passes it on to its children), so the server segfaults in
+`CFilterModel::PassesFilterImpl` and friends. L4D's own `filter_activator_team` and
+`filter_activator_infected_class` do check, so they are left alone; blocking them would only
+suppress their outputs.
+
+We hit it on `c6m2_bedlam` (The Passing): a trigger covering the whole alarm battlefield sent
+`filter_witchkill` a `TestActivator` for every infected that touched it during the alarm. On a
+test server, re-adding those outputs with a 0.1 s delay and killing each common that touched the
+trigger crashed 4 out of 4 runs within 7 spawn cycles. With the plugin, 60 cycles and 412 trigger
+fires ran clean, and the plugin dropped 16 inputs that would each have crashed. A filter given a
+real activator passes and fails exactly as before.
+
+The plugin hooks `AcceptInput` on those classes as they are created (server-only entities
+included, and anything a template spawns later) and drops the input when the activator is NULL.
+Each dropped input is written to the game log:
+
+    NULLACTIVATOR map=c6m2_bedlam class=filter_activator_model name="filter_witchkill" input=TestActivator
+
+It is based on "[ANY] Fix Null Activator" by GoD-Tony and blueblur
+([blueblur0730/modified-plugins](https://github.com/blueblur0730/modified-plugins)). That plugin's
+config lists several classes under one input by repeating the `entity_name` key, but reads it
+with `KeyValues.GetString`, which returns only the first key. As a result only `game_ui` and
+`filter_activator_class` were hooked, and `filter_activator_model` was not. This version builds
+the class table into the plugin, hooks in `OnEntityCreated` instead of one sweep at map start,
+and takes the `AcceptInput` offset from SourceMod's `sdktools.games`, so there is no gamedata file.
+
 ## Tools
 
 `tools/stripper_close_brush_window.py` closes the L4D1 map-load crash from model-less
@@ -861,5 +895,6 @@ the solid output. It only inserts lines and keeps line endings.
 ## Credits and license
 
 The forks keep their original authors in the plugin info (Visor, ProdigySim, CanadaRox,
-Tabun, zonde306, Luckylockm, Silvers, Harry and others). Everything is GPLv3, like
+Tabun, zonde306, Luckylockm, Silvers, Harry and others). The null activator guard is based on
+GoD-Tony's and blueblur's Fix Null Activator. Everything is GPLv3, like
 SourceMod.
