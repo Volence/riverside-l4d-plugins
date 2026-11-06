@@ -10,7 +10,7 @@ public Plugin myinfo =
 	name = "[L4D1/L4D2] Collision Adjustments",
 	author = "Sir, Harry Potter",
 	description = "No collisions to fix a handful of silly collision bugs in l4d",
-	version = "1.3h-riverside1",
+	version = "1.3h-riverside2",
 	url = "http://steamcommunity.com/profiles/76561198026784913"
 }
 
@@ -503,7 +503,7 @@ void OnNextFrame_func_simpleladder(int entityRef)
 // We don't send infected ladder data to survivors, this bit handles the clientside prediction so that they don't get visual bugs (jitter/rubberbanding)
 Action Hook_SetTransmit(int entity, int client)
 {
-	if (GetClientTeam(client) == L4D_TEAM_SUR) {
+	if (g_bSurvivorLadder && GetClientTeam(client) == L4D_TEAM_SUR) {
 		return Plugin_Handled;
 	}
 
