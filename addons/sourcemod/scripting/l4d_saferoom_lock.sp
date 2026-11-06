@@ -5,7 +5,7 @@
 #include <sdktools>
 #include <left4dhooks>
 
-#define PLUGIN_VERSION "1.2"
+#define PLUGIN_VERSION "1.3"
 
 #define TEAM_SURVIVOR		2
 #define TEAM_INFECTED		3
@@ -40,8 +40,8 @@
 // belongs to the pass does not count as the tank being killed.
 #define TANK_PASS_WINDOW	5.0
 
-ConVar g_hCvarEnable, g_hCvarTank, g_hCvarWitch, g_hCvarForceOpen, g_hCvarDoorState;
-bool g_bCvarEnable, g_bCvarTank, g_bCvarWitch;
+ConVar g_hCvarEnable, g_hCvarTank, g_hCvarWitch, g_hCvarWitchDone, g_hCvarForceOpen, g_hCvarDoorState;
+bool g_bCvarEnable, g_bCvarTank, g_bCvarWitch, g_bCvarWitchDone;
 int g_iCvarForceOpen, g_iCvarDoorState;
 
 bool g_bHooked;
@@ -57,6 +57,10 @@ int g_iRoundStart, g_iPlayerSpawn;
 Handle g_hCheckTimer;
 float g_fTankGraceUntil;	// game time until which a vanished tank still counts as alive
 float g_fTankPassUntil;		// game time until which a tank pass is in progress
+// Witches that already incapped or killed a survivor, by entity reference. Once she has done that
+// she stays on her victim or runs off (WitchRetreat), and a retreat can end somewhere nobody can
+// reach (Dead Air 1 street, 2026-10-20), so she no longer holds the door.
+ArrayList g_aWitchDone;
 
 public Plugin myinfo =
 {
@@ -99,6 +103,9 @@ public void OnPluginStart()
 	g_hCvarWitch		= CreateConVar("l4d_saferoom_lock_witch", "1",
 							"A live witch locks the end saferoom door. [0-Disable,1-Enable]",
 							FCVAR_NOTIFY, true, 0.0, true, 1.0);
+	g_hCvarWitchDone	= CreateConVar("l4d_saferoom_lock_witch_done", "1",
+							"A witch that has already incapped or killed a survivor no longer locks the door. [0-She still does,1-She does not]",
+							FCVAR_NOTIFY, true, 0.0, true, 1.0);
 	g_hCvarForceOpen	= CreateConVar("l4d_saferoom_lock_force_open", "0",
 							"Unlock the door anyway this many seconds into the round, even if a boss is alive. (0=never)",
 							FCVAR_NOTIFY, true, 0.0);
@@ -109,6 +116,8 @@ public void OnPluginStart()
 	g_hCvarEnable.AddChangeHook(ConVarChanged_Allowed);
 	g_hCvarTank.AddChangeHook(ConVarChanged_Cvars);
 	g_hCvarWitch.AddChangeHook(ConVarChanged_Cvars);
+	g_hCvarWitchDone.AddChangeHook(ConVarChanged_Cvars);
+	g_aWitchDone = new ArrayList();
 	g_hCvarForceOpen.AddChangeHook(ConVarChanged_Cvars);
 	g_hCvarDoorState.AddChangeHook(ConVarChanged_Cvars);
 
@@ -139,6 +148,7 @@ void GetCvars()
 {
 	g_bCvarTank = g_hCvarTank.BoolValue;
 	g_bCvarWitch = g_hCvarWitch.BoolValue;
+	g_bCvarWitchDone = g_hCvarWitchDone.BoolValue;
 	g_iCvarForceOpen = g_hCvarForceOpen.IntValue;
 	g_iCvarDoorState = g_hCvarDoorState.IntValue;
 }
@@ -183,6 +193,7 @@ void HookEvents()
 	HookEvent("round_start",	Event_RoundStart);
 	HookEvent("player_spawn",	Event_PlayerSpawn,	EventHookMode_PostNoCopy);
 	HookEvent("player_death",	Event_PlayerDeath);
+	HookEvent("player_incapacitated",	Event_SurvivorDown);
 	HookEvent("tank_frustrated",	Event_TankFrustrated,	EventHookMode_PostNoCopy);
 	HookEvent("witch_killed",	Event_BossDeath,	EventHookMode_PostNoCopy);
 	HookEvent("round_end",		Event_RoundEnd);
@@ -199,6 +210,7 @@ void UnHookEvents()
 	UnhookEvent("round_start",		Event_RoundStart);
 	UnhookEvent("player_spawn",		Event_PlayerSpawn,	EventHookMode_PostNoCopy);
 	UnhookEvent("player_death",		Event_PlayerDeath);
+	UnhookEvent("player_incapacitated",	Event_SurvivorDown);
 	UnhookEvent("tank_frustrated",	Event_TankFrustrated,	EventHookMode_PostNoCopy);
 	UnhookEvent("witch_killed",		Event_BossDeath,	EventHookMode_PostNoCopy);
 	UnhookEvent("round_end",		Event_RoundEnd);
@@ -236,6 +248,8 @@ public void Event_RoundEnd(Event event, const char[] name, bool dontBroadcast)
 // door right away. A death during a tank pass keeps the grace.
 public void Event_PlayerDeath(Event event, const char[] name, bool dontBroadcast)
 {
+	Event_SurvivorDown(event, name, dontBroadcast);
+
 	int client = GetClientOfUserId(event.GetInt("userid"));
 	if( client < 1 || !IsClientInGame(client) || GetClientTeam(client) != TEAM_INFECTED ) return;
 	if( GetEntProp(client, Prop_Send, "m_zombieClass") != g_iZombieClassTank ) return;
@@ -244,6 +258,27 @@ public void Event_PlayerDeath(Event event, const char[] name, bool dontBroadcast
 		g_fTankGraceUntil = 0.0;
 
 	Event_BossDeath(event, name, dontBroadcast);
+}
+
+// A survivor incapped or killed by a witch: remember her (see g_aWitchDone).
+public void Event_SurvivorDown(Event event, const char[] name, bool dontBroadcast)
+{
+	int client = GetClientOfUserId(event.GetInt("userid"));
+	if( client < 1 || !IsClientInGame(client) || GetClientTeam(client) != TEAM_SURVIVOR ) return;
+
+	int witch = event.GetInt("attackerentid");
+	if( witch <= MaxClients || !IsValidEntity(witch) ) return;
+
+	char cls[16];
+	GetEntityClassname(witch, cls, sizeof(cls));
+	if( !StrEqual(cls, "witch") ) return;
+
+	int ref = EntIndexToEntRef(witch);
+	if( g_aWitchDone.FindValue(ref) == -1 )
+		g_aWitchDone.Push(ref);
+
+	if( g_bCvarEnable && g_bDoorLocked )
+		RequestFrame(Frame_RecheckDoor);
 }
 
 public void Event_TankFrustrated(Event event, const char[] name, bool dontBroadcast)
@@ -286,6 +321,7 @@ void ResetRound()
 	g_iRoundSeconds = 0;
 	g_fTankGraceUntil = 0.0;
 	g_fTankPassUntil = 0.0;
+	if( g_aWitchDone != null ) g_aWitchDone.Clear();
 	g_iRoundStart = 0;
 	g_iPlayerSpawn = 0;
 
@@ -482,8 +518,9 @@ bool IsWitchAlive()
 		// A witch entity with no health is not a live witch. The director can
 		// leave one of these at the map origin (seen on a coop test server), and
 		// counting it would hold the door shut for the whole round.
-		if( IsValidEntity(entity) && GetEntProp(entity, Prop_Data, "m_iHealth") > 0 )
-			return true;
+		if( !IsValidEntity(entity) || GetEntProp(entity, Prop_Data, "m_iHealth") <= 0 ) continue;
+		if( g_bCvarWitchDone && g_aWitchDone.FindValue(EntIndexToEntRef(entity)) != -1 ) continue;
+		return true;
 	}
 
 	return false;
