@@ -5,7 +5,7 @@
 #include <sdktools>
 #include <left4dhooks>
 
-#define PLUGIN_VERSION "0.2-riverside1"
+#define PLUGIN_VERSION "0.2.1-riverside1"
 
 /**
  * l4d_boomer_horde_fix - every boom brings a full horde that actually arrives.
@@ -49,6 +49,13 @@
  * OnSurvivorVomitedUpon), and a common already slated for removal is never
  * counted or added again (the BOOMHORDE line reports any still pending).
  *
+ * 0.2.1: "already removed" is the engine's EFL_KILLME flag, not a plugin
+ * array. RemoveEntity runs UpdateOnRemove at once, so OnEntityDestroyed fires
+ * immediately while the common stays in the entity list until the frame ends;
+ * 0.2's array was cleared there, and a boomer splash covering several
+ * survivors in one frame replaced the same commons once per victim (rig: two
+ * victims, 30 replaced twice, pending 60).
+ *
  * Also 0.2: NavAreaTravelDistance only finds the goal when it lies over a nav
  * area, so a victim on a car roof, ledge or prop (Double at z 176 on farm02)
  * made every common "no path" and nearly all of them were replaced. When the
@@ -59,6 +66,7 @@
 
 #define TEAM_SURVIVOR 2
 #define MIN_AGE 3.0
+#define EFL_KILLME 1   // UTIL_Remove has run; the entity goes away at the end of the frame
 #define GOAL_SNAP 400.0   // furthest the last known area centre may be from the victim
 
 ConVar g_cvEnabled;
@@ -66,7 +74,6 @@ ConVar g_cvTravel;
 ConVar g_cvGuard;
 ConVar g_cvNoticeRange;
 float g_fBorn[2049];   // game time each common was created
-bool g_bRemoving[2049]; // removed by this plugin, deletion still pending
 int g_iRemoved;        // commons removed by the pre-forward of the vomit being handled
 Handle g_hSpawnITMob;
 
@@ -103,16 +110,7 @@ public void OnPluginStart()
 public void OnEntityCreated(int entity, const char[] classname)
 {
 	if (entity > 0 && entity < sizeof(g_fBorn) && StrEqual(classname, "infected"))
-	{
 		g_fBorn[entity] = GetGameTime();
-		g_bRemoving[entity] = false;
-	}
-}
-
-public void OnEntityDestroyed(int entity)
-{
-	if (entity > 0 && entity < sizeof(g_bRemoving))
-		g_bRemoving[entity] = false;
 }
 
 public Action L4D_OnVomitedUpon(int victim, int &attacker, bool &boomerExplosion)
@@ -145,7 +143,7 @@ public Action L4D_OnVomitedUpon(int victim, int &attacker, bool &boomerExplosion
 		GetEntPropVector(ent, Prop_Send, "m_vecOrigin", p);
 		if (GetVectorDistance(v, p) >= range)
 			continue;
-		if (ent < sizeof(g_bRemoving) && g_bRemoving[ent])
+		if (GetEntProp(ent, Prop_Data, "m_iEFlags") & EFL_KILLME)
 		{
 			stale++;   // removed by an earlier vomit and still alive: never count it twice
 			continue;
@@ -162,8 +160,6 @@ public Action L4D_OnVomitedUpon(int victim, int &attacker, bool &boomerExplosion
 			noPath++;
 		else
 			far++;
-		if (ent < sizeof(g_bRemoving))
-			g_bRemoving[ent] = true;
 		RemoveEntity(ent);
 	}
 
