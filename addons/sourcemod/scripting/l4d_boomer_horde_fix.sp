@@ -5,7 +5,7 @@
 #include <sdktools>
 #include <left4dhooks>
 
-#define PLUGIN_VERSION "0.1-riverside1"
+#define PLUGIN_VERSION "0.2-riverside1"
 
 /**
  * l4d_boomer_horde_fix - every boom brings a full horde that actually arrives.
@@ -38,16 +38,35 @@
  *
  * Each vomit with a removal logs a "(BOOMHORDE)" line to the game log, next
  * to the engine's "(MOB)" lines.
+ *
+ * 0.2 (PUG 1060, farm02): the vomit stream calls OnVomitedUpon on the same
+ * victim several times in a row (7 calls in 0.08 s there). The engine only
+ * spawns on the first, but 0.1 re-found the same 15 commons each time (still
+ * alive, removal pending), and each post-forward raised the pending mob by
+ * another 15: one boom became a mob of 117. Now the plugin acts only when the
+ * engine itself will count (the victim's m_itTimer has run out, the same test
+ * CTerrorPlayer::OnVomitedUpon makes before NextBotManager::
+ * OnSurvivorVomitedUpon), and a common already slated for removal is never
+ * counted or added again (the BOOMHORDE line reports any still pending).
+ *
+ * Also 0.2: NavAreaTravelDistance only finds the goal when it lies over a nav
+ * area, so a victim on a car roof, ledge or prop (Double at z 176 on farm02)
+ * made every common "no path" and nearly all of them were replaced. When the
+ * victim is not over nav, the walk is measured to the centre of the victim's
+ * last known nav area instead; if that area is not near the victim either,
+ * nothing is replaced.
  */
 
 #define TEAM_SURVIVOR 2
 #define MIN_AGE 3.0
+#define GOAL_SNAP 400.0   // furthest the last known area centre may be from the victim
 
 ConVar g_cvEnabled;
 ConVar g_cvTravel;
 ConVar g_cvGuard;
 ConVar g_cvNoticeRange;
 float g_fBorn[2049];   // game time each common was created
+bool g_bRemoving[2049]; // removed by this plugin, deletion still pending
 int g_iRemoved;        // commons removed by the pre-forward of the vomit being handled
 Handle g_hSpawnITMob;
 
@@ -84,22 +103,40 @@ public void OnPluginStart()
 public void OnEntityCreated(int entity, const char[] classname)
 {
 	if (entity > 0 && entity < sizeof(g_fBorn) && StrEqual(classname, "infected"))
+	{
 		g_fBorn[entity] = GetGameTime();
+		g_bRemoving[entity] = false;
+	}
+}
+
+public void OnEntityDestroyed(int entity)
+{
+	if (entity > 0 && entity < sizeof(g_bRemoving))
+		g_bRemoving[entity] = false;
 }
 
 public Action L4D_OnVomitedUpon(int victim, int &attacker, bool &boomerExplosion)
 {
+	g_iRemoved = 0;
 	if (!g_cvEnabled.BoolValue || victim < 1 || victim > MaxClients || !IsClientInGame(victim) || GetClientTeam(victim) != TEAM_SURVIVOR)
 		return Plugin_Continue;
 
-	g_iRemoved = 0;
+	float now = GetGameTime();
+	// the engine only counts and spawns while the victim is not yet "it"; the vomit
+	// stream calls this several times per boom and every later call must do nothing
+	float itEnd = GetEntPropFloat(victim, Prop_Send, "m_itTimer", 1);
+	if (itEnd > 0.0 && !(now > itEnd))
+		return Plugin_Continue;
+
 	float range = g_cvNoticeRange.FloatValue;
 	float maxTravel = g_cvTravel.FloatValue;
-	float now = GetGameTime();
 	float v[3], p[3];
 	GetClientAbsOrigin(victim, v);
+	float goal[3];
+	if (!VictimNavGoal(victim, v, goal))
+		return Plugin_Continue;
 
-	int inRange, noPath, far;
+	int inRange, noPath, far, stale;
 	int ent = -1;
 	while ((ent = FindEntityByClassname(ent, "infected")) != -1)
 	{
@@ -108,25 +145,32 @@ public Action L4D_OnVomitedUpon(int victim, int &attacker, bool &boomerExplosion
 		GetEntPropVector(ent, Prop_Send, "m_vecOrigin", p);
 		if (GetVectorDistance(v, p) >= range)
 			continue;
+		if (ent < sizeof(g_bRemoving) && g_bRemoving[ent])
+		{
+			stale++;   // removed by an earlier vomit and still alive: never count it twice
+			continue;
+		}
 		inRange++;
 		if (ent < sizeof(g_fBorn) && now - g_fBorn[ent] < MIN_AGE)
 			continue;
 		if (NearOrSeenBySurvivor(ent, p))
 			continue;
-		float travel = L4D2_NavAreaTravelDistance(p, v, false);
+		float travel = L4D2_NavAreaTravelDistance(p, goal, false);
 		if (travel >= 0.0 && travel <= maxTravel)
 			continue;
 		if (travel < 0.0)
 			noPath++;
 		else
 			far++;
+		if (ent < sizeof(g_bRemoving))
+			g_bRemoving[ent] = true;
 		RemoveEntity(ent);
 	}
 
 	g_iRemoved = noPath + far;
 	if (g_iRemoved > 0)
-		LogToGame("(BOOMHORDE) %N vomited: %d commons in range, replacing %d (%d no path, %d over %.0f walk)",
-		          victim, inRange, g_iRemoved, noPath, far, maxTravel);
+		LogToGame("(BOOMHORDE) %N vomited: %d commons in range, replacing %d (%d no path, %d over %.0f walk, %d still pending removal)",
+		          victim, inRange, g_iRemoved, noPath, far, maxTravel, stale);
 	return Plugin_Continue;
 }
 
@@ -140,6 +184,29 @@ public void L4D_OnVomitedUpon_Post(int victim, int attacker, bool boomerExplosio
 	Address zm = L4D_GetPointer(POINTER_ZOMBIEMANAGER);
 	if (zm != Address_Null)
 		SDKCall(g_hSpawnITMob, zm, want);
+}
+
+// another plugin blocked the vomit: our post-forward will not run, drop the count
+public void L4D_OnVomitedUpon_PostHandled(int victim, int attacker, bool boomerExplosion)
+{
+	g_iRemoved = 0;
+}
+
+// NavAreaTravelDistance only reaches a goal that lies over a nav area; off the mesh
+// (car roof, ledge, prop) use the centre of the victim's last known area. False when
+// that area is missing or too far away to stand in for the victim.
+bool VictimNavGoal(int victim, const float v[3], float goal[3])
+{
+	goal = v;
+	float probe[3];
+	probe = v;
+	if (L4D2Direct_GetTerrorNavArea(probe) != Address_Null)
+		return true;
+	Address area = L4D_GetLastKnownArea(victim);
+	if (area == Address_Null)
+		return false;
+	L4D_GetNavAreaCenter(area, goal);
+	return GetVectorDistance(v, goal) <= GOAL_SNAP;
 }
 
 bool NearOrSeenBySurvivor(int common, const float pos[3])
