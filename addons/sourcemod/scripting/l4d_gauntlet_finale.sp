@@ -60,7 +60,7 @@
 #include <dhooks>
 #include <left4dhooks>
 
-#define PLUGIN_VERSION			"1.5"
+#define PLUGIN_VERSION			"1.6"
 #define TEAM_SURVIVOR			2
 #define TEAM_INFECTED			3
 #define ZC_TANK					5
@@ -82,6 +82,9 @@
 #define SCREAM_SAMPLE			"mega_mob_incoming"
 #define SCREAM_BURST			0.5
 #define SCREAM_WAIT				3.0		// horde back and no scream of the engine's own by then: we play one
+// mob window: fewest spawn-band areas it may hold, and how far back it widens per step until it holds them
+#define WINDOW_MIN_AREAS		20
+#define WINDOW_WIDEN			500.0
 
 ConVar g_cvNoEscapeTank;
 KeyValues g_hMIData;
@@ -117,6 +120,7 @@ float g_fWindowMaxFlow;			// highest flow of an area mobs may use when the windo
 // "gauntlet_discard_range" "<units>": z_discard_range for the escape (see SetDiscardRange)
 float g_fDiscard;
 ConVar g_cvDiscard;
+ConVar g_cvSpawnSafety;
 float g_fDiscardWas = -1.0;
 
 float g_fScreamAt = -100.0;		// game time the last scream burst started
@@ -180,6 +184,7 @@ public void OnAllPluginsLoaded()
 {
 	g_cvNoEscapeTank = FindConVar("no_escape_tank");
 	g_cvDiscard = FindConVar("z_discard_range");
+	g_cvSpawnSafety = FindConVar("z_finale_spawn_safety_range");
 }
 
 public void OnMapStart()
@@ -633,7 +638,8 @@ Action Timer_HordeBackScream(Handle timer, int round)
 // direction), which in a tower means floors above and below that the commons need a long walk to leave: match
 // fd4d95a3 map 4, 85% of commons spawned 600-1200 away, 95% on another floor, and only 31% ever came within 300 of
 // a survivor. L4D2 runs this finale with PreferredMobDirection SPAWN_IN_FRONT_OF_SURVIVORS (cwm_finale.nut). Near
-// the end, where the window would run past the last ground mobs may use, it slides back by the overflow.
+// the end, where the window would run past the last ground mobs may use, it slides back by the overflow, and it
+// widens backwards wherever it holds too few areas in the spawn band.
 void StartWindow()
 {
 	delete g_aAreas;
@@ -707,18 +713,18 @@ Action Timer_Window(Handle timer)
 	if (first <= 0.0)
 		return Plugin_Continue;
 	float lo = last - g_fWindowBack, hi = first + g_fWindowAhead;
-	if (first > g_fWindowMaxFlow)
-	{
-		// past the last ground mobs may use (cwm4: on the roof): the floors in the window are on the far side of the
-		// building, out of the spawn band, and no mob found an area (22 pending, none alive); no window from here
-		lo = -1.0;
-		hi = 1.0e9;
-	}
-	else if (hi > g_fWindowMaxFlow)
+	if (hi > g_fWindowMaxFlow)
 	{
 		lo -= hi - g_fWindowMaxFlow;
 		hi = g_fWindowMaxFlow;
 	}
+	// The engine only takes areas in the spawn band of the closest survivor (bots too). Where the window holds too
+	// few of them (cwm4 roof: the last mob ground is right under the survivors, inside the band) no mob finds an area,
+	// so widen it backwards until it does. Switching the window off there let the engine pick floors 11000-18000 flow
+	// back that the commons never walked out of.
+	float band = g_cvSpawnSafety ? g_cvSpawnSafety.FloatValue : 600.0;
+	while (lo > 0.0 && CountBandAreas(lo, hi, band) < WINDOW_MIN_AREAS)
+		lo -= WINDOW_WIDEN;
 	for (int i = 0; i < g_aAreas.Length; i++)
 	{
 		Address a = g_aAreas.Get(i);
@@ -737,6 +743,35 @@ Action Timer_Window(Handle timer)
 		}
 	}
 	return Plugin_Continue;
+}
+
+// Areas mobs may use with the window at [lo, hi]: not NO_MOBS by the map, and between band and twice that from the
+// closest living survivor, as ZombieManager::CollectSpawnAreas takes them in a versus finale.
+int CountBandAreas(float lo, float hi, float band)
+{
+	float pos[MAXPLAYERS + 1][3];
+	int n;
+	for (int i = 1; i <= MaxClients; i++)
+		if (IsClientInGame(i) && GetClientTeam(i) == TEAM_SURVIVOR && IsPlayerAlive(i))
+			GetClientAbsOrigin(i, pos[n++]);
+	int count;
+	for (int i = 0; i < g_aAreas.Length; i++)
+	{
+		Address a = g_aAreas.Get(i);
+		float flow = L4D2Direct_GetTerrorNavAreaFlow(a);
+		if (flow < lo || flow > hi || !WindowOwned(i) && (L4D_GetNavArea_SpawnAttributes(a) & SPAWN_NO_MOBS))
+			continue;
+		float c[3], closest = 1.0e9;
+		L4D_GetNavAreaCenter(a, c);
+		for (int k = 0; k < n; k++)
+		{
+			float d = GetVectorDistance(c, pos[k]);
+			if (d < closest) closest = d;
+		}
+		if (closest >= band && closest <= 2.0 * band)
+			count++;
+	}
+	return count;
 }
 
 public void OnPluginEnd()
