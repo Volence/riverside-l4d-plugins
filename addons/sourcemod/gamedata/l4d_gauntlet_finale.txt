@@ -1,0 +1,111 @@
+"Games"
+{
+	"left4dead"
+	{
+		"Functions"
+		{
+			"GF_FindGoalArea"
+			{
+				"signature"	"TerrorNavMesh::FindGoalArea"
+				"callconv"	"thiscall"
+				"return"	"int"
+				"this"		"address"
+			}
+			"GF_ComputeFlowDistances"
+			{
+				"signature"	"TerrorNavMesh::ComputeFlowDistances"
+				"callconv"	"thiscall"
+				"return"	"void"
+				"this"		"address"
+			}
+			"GF_RecomputeTeamScores"
+			{
+				"signature"	"CTerrorGameRules::RecomputeTeamScores"
+				"callconv"	"thiscall"
+				"return"	"void"
+				"this"		"address"
+			}
+			"GF_StartPanicEvent"
+			{
+				"signature"	"Director::StartPanicEvent"
+				"callconv"	"thiscall"
+				"return"	"void"
+				"this"		"address"
+				"arguments"
+				{
+					"waves"
+					{
+						"type"	"int"
+					}
+					"player"
+					{
+						"type"	"cbaseentity"
+					}
+				}
+			}
+			"GF_OnFinaleFinalBattle"
+			{
+				"signature"	"Music::OnFinaleFinalBattle"
+				"callconv"	"thiscall"
+				"return"	"void"
+				"this"		"address"
+			}
+			"GF_IsBlocked"
+			{
+				"signature"	"CNavArea::IsBlocked"
+				"callconv"	"thiscall"
+				"return"	"bool"
+				"this"		"address"
+				"arguments"
+				{
+					"teamID"
+					{
+						"type"	"int"
+					}
+					"ignoreNavBlockers"
+					{
+						"type"	"bool"
+					}
+				}
+			}
+		}
+		"Signatures"
+		{
+			"Music::OnFinaleFinalBattle"
+			{
+				"library"	"server"
+				"linux"		"@_ZN5Music19OnFinaleFinalBattleEv"
+			}
+			"TerrorNavMesh::FindGoalArea"
+			{
+				"library"	"server"
+				"linux"		"@_ZNK13TerrorNavMesh12FindGoalAreaEv"
+			}
+			"TerrorNavMesh::ComputeFlowDistances"
+			{
+				"library"	"server"
+				"linux"		"@_ZN13TerrorNavMesh20ComputeFlowDistancesEv"
+			}
+			"CTerrorGameRules::RecomputeTeamScores"
+			{
+				"library"	"server"
+				"linux"		"@_ZN16CTerrorGameRules19RecomputeTeamScoresEv"
+			}
+			"Director::StartPanicEvent"
+			{
+				"library"	"server"
+				"linux"		"@_ZN8Director15StartPanicEventEiP11CBasePlayer"
+			}
+			"Director::StopPanicEvent"
+			{
+				"library"	"server"
+				"linux"		"@_ZN8Director14StopPanicEventEv"
+			}
+			"CNavArea::IsBlocked"
+			{
+				"library"	"server"
+				"linux"		"@_ZNK8CNavArea9IsBlockedEib"
+			}
+		}
+	}
+}
