@@ -44,7 +44,7 @@ Each plugin ships as source (`addons/sourcemod/scripting`) and compiled
 | `l4d_onslaught_tank_pause` | 1.0 | | For converted L4D2 maps whose onslaughts (a horde that keeps coming until a button is pressed) are rebuilt with `director_panic_forever` by relays named `l4d1_onslaught_on` / `l4d1_onslaught_off`: while any tank is alive the endless horde is held off, and when the last tank dies it comes back with a fresh panic, unless the button was pressed meanwhile. See below. |
 | `l4d_pillar_rubble_cleanup` | 1.0 | | Once no tank is alive, deletes the loose chunks a tank leaves when it breaks a concrete pillar (No Mercy 2, Milltown), which otherwise stay solid for the rest of the round. The stump stays. See below. |
 | `l4d_nullmodel_guard` | 1.0 | sdkhooks | Closes a server crash on ported L4D2 maps: a brush entity with no model that spawns solid is made non-solid, so a trace through it can no longer crash the server. Each one is logged. See below. |
-| `l4d_hltv_addon_guard` | 1.0 | sdkhooks; SourceTV Manager for the join window | Stops a stock client watching SourceTV from crashing to desktop when it joins a game in progress (often the 4th map). Survivors' holstered-weapon models are switched off during ready-up and for 45 s after a SourceTV spectator connects. See below. |
+| `l4d_hltv_addon_guard` | 1.1 | sdkhooks; SourceTV Manager for the join window | Stops a stock client watching SourceTV from crashing to desktop when it joins a game in progress (often the 4th map). Survivors' holstered-weapon models are switched off during ready-up and for 45 s after a SourceTV spectator connects. Also keeps an intro camera from freezing the SourceTV bot, which killed every viewer's mouse look. See below. |
 | `l4d_null_activator_guard` | 1.0 | DHooks (offset from SourceMod's own sdktools gamedata) | Closes a server crash when a map's queued filter input outlives the entity that triggered it: a `TestActivator` with no activator on the filters that read it without a check, and `game_ui` `Deactivate`, are dropped and logged. Based on GoD-Tony and blueblur's Fix Null Activator. See below. |
 
 ## Fixed forks of existing plugins
@@ -853,6 +853,15 @@ Players do not see holstered weapons on survivors during those windows. Each swi
 
 On a test server running our full plugin set, a fresh stock spectator joining Dead Air 4 mid-round
 crashed in 9 of 12 joins without the plugin and in 0 of 6 with it.
+
+**1.1, intro camera unfreeze.** An intro `point_viewcontrol_multiplayer` (No Mercy 1 in versus) freezes
+every player in game, the SourceTV bot included, and points their view at the camera. When it ends,
+`CTriggerCameraMultiplayer::Disable` gives control back only to living players, and the SourceTV bot is
+always dead, so it stays `FL_FROZEN`. A SourceTV viewer's local player is that bot, and the client's
+`C_BasePlayer::CreateMove` puts the old view angles back every frame while the local player is frozen,
+so every viewer's mouse look is dead for the rest of the round. A 0.25 s timer clears the flag and the
+view handle on the SourceTV bot (logged as `HLTVUNFREEZE`); the bot never moves, so the game does not
+change. `l4d_hltv_addon_guard_unfreeze 0` turns it off.
 
 ## Null activator guard
 
