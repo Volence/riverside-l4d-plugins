@@ -17,14 +17,24 @@
  *     reload the map with everyone else, and SourceTV does not count them while it changes level, so every map
  *     start is guarded;
  *   - for l4d_hltv_addon_guard_join_secs after a SourceTV spectator connects.
+ *
+ * 1.1: SourceTV camera unfreeze. An intro point_viewcontrol_multiplayer (hospital01, farm01, smalltown01, ...)
+ * freezes every player in game, the SourceTV bot included, and points their view at the camera. When it ends,
+ * CTriggerCameraMultiplayer::Disable/RemovePlayer give control back only to living players; the SourceTV bot is
+ * always dead (team 1, lifeState 2), so it keeps FL_FROZEN. A SourceTV viewer's local player is that bot, and
+ * C_BasePlayer::CreateMove (L4D1 client.dll 0x100602ee) puts back the old view angles every frame while the local
+ * player is frozen, so mouse look is dead for every viewer. Match 1189 (hospital01, 2026-11-15): frozen for all of
+ * both halves. A short timer clears FL_FROZEN and the camera view handle on the SourceTV bot; the bot never
+ * moves, so nothing in the game changes. l4d_hltv_addon_guard_unfreeze 0 turns it off.
  */
 #pragma semicolon 1
 #pragma newdecls required
 
 #include <sourcemod>
 #include <sdkhooks>
+#include <sdktools>
 
-#define PLUGIN_VERSION	"1.0"
+#define PLUGIN_VERSION	"1.1"
 
 public Plugin myinfo =
 {
@@ -36,6 +46,7 @@ public Plugin myinfo =
 };
 
 ConVar g_cvJoinSecs;
+ConVar g_cvUnfreeze;
 bool g_bUntilLeftStart;		// map-start guard, cleared when the survivors leave the saferoom
 float g_fUntil;				// join guard, GetEngineTime() deadline
 bool g_bLate;				// loaded mid-map: the saferoom may already be behind us, so no map-start guard
@@ -50,6 +61,8 @@ public void OnPluginStart()
 {
 	CreateConVar("l4d_hltv_addon_guard_version", PLUGIN_VERSION, "l4d_hltv_addon_guard version", FCVAR_NOTIFY | FCVAR_DONTRECORD);
 	g_cvJoinSecs = CreateConVar("l4d_hltv_addon_guard_join_secs", "45", "Seconds the holstered-weapon models stay off after a SourceTV spectator connects", _, true, 0.0);
+	g_cvUnfreeze = CreateConVar("l4d_hltv_addon_guard_unfreeze", "1", "Clear the intro camera's freeze and view on the SourceTV bot, so SourceTV viewers keep mouse look", _, true, 0.0, true, 1.0);
+	CreateTimer(0.25, Timer_Unfreeze, _, TIMER_REPEAT);
 	HookEvent("player_left_start_area", Event_LeftStartArea, EventHookMode_PostNoCopy);
 	for (int i = 1; i <= MaxClients; i++)
 	{
@@ -99,4 +112,22 @@ void OnPostThinkPost(int client)
 	{
 		SetEntProp(client, Prop_Send, "m_iAddonBits", 0);
 	}
+}
+
+// Runs across map changes (no TIMER_FLAG_NO_MAPCHANGE); a cheap check of one client.
+Action Timer_Unfreeze(Handle timer)
+{
+	if (!g_cvUnfreeze.BoolValue) return Plugin_Continue;
+	for (int i = 1; i <= MaxClients; i++)
+	{
+		if (!IsClientInGame(i) || !IsClientSourceTV(i)) continue;
+		int flags = GetEntityFlags(i);
+		int view = GetEntPropEnt(i, Prop_Send, "m_hViewEntity");
+		if (!(flags & FL_FROZEN) && (view == -1 || view == i)) continue;
+		if (flags & FL_FROZEN) SetEntityFlags(i, flags & ~FL_FROZEN);
+		// SetClientViewEntity only moves the engine's view; the networked handle needs a direct write.
+		if (view != -1 && view != i) SetEntPropEnt(i, Prop_Send, "m_hViewEntity", -1);
+		LogMessage("HLTVUNFREEZE cleared SourceTV bot: frozen %d, view entity %d", (flags & FL_FROZEN) ? 1 : 0, view);
+	}
+	return Plugin_Continue;
 }
