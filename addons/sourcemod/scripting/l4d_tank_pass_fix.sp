@@ -5,7 +5,7 @@
 #include <sdktools>
 #include <left4dhooks>
 
-#define PLUGIN_VERSION "0.3"
+#define PLUGIN_VERSION "0.4"
 
 /**
  * l4d_tank_pass_fix - a passed tank no longer bounces off its new owner.
@@ -49,6 +49,17 @@
  * engine warp; nothing found leaves it to the stock 5 s warp. A pass hands
  * the old tank's trail to the new one, so a tank passed while stuck (match
  * 920 DT4) is covered too. l4d_tank_pass_fix_unstick 0 logs these as well.
+ *
+ * 0.4: the hull test no longer counts players as solid. 0.2/0.3 skipped only
+ * the tank itself, so a pass with a survivor, a teammate or the old tank's
+ * own body touching the new tank read as "stuck": 34 post-pass stuck lines
+ * 11-03..11-15, 27 "STILL STUCK" (24 not moved at all), and none followed by
+ * a frozen line (the engine's own stuck counter) within 90 s. The effect was
+ * a harmless teleport in place, but the log was noise and a real stuck pass
+ * could be sent to the engine warp for the wrong reason. Movement against
+ * players is the engine's business; this plugin only cares about the world,
+ * props, clips and blockers. The stuck and frozen lines now name what the
+ * hull hit (hit=world or the entity's classname) so a stray blocker shows up.
  */
 
 ConVar g_cvEnabled, g_cvLottery, g_cvUnstick;
@@ -137,14 +148,17 @@ void CheckStuckTank(int client, const float pos[3])
 		return;
 	g_iStuckTicks[client] = 0;
 
+	char hit[32] = "none";
+	if (HullBlocked(client, pos))
+		HitName(hit, sizeof(hit));
 	bool haveClear = GetGameTime() - g_fClearSpotAt[client] <= CLEAR_SPOT_MAX_AGE
 		&& GetVectorDistance(g_vClearSpot[client], pos) <= CLEAR_SPOT_MAX_DIST
 		&& !HullBlocked(client, g_vClearSpot[client]);
 
 	if (!g_cvUnstick.BoolValue)
 	{
-		LogToFileEx(g_sLog, "frozen \"%N\" at=%.1f %.1f %.1f stucklast=%d clear=%d (log only)",
-			client, pos[0], pos[1], pos[2], GetEntProp(client, Prop_Data, "m_StuckLast"), haveClear);
+		LogToFileEx(g_sLog, "frozen \"%N\" at=%.1f %.1f %.1f stucklast=%d clear=%d hit=%s (log only)",
+			client, pos[0], pos[1], pos[2], GetEntProp(client, Prop_Data, "m_StuckLast"), haveClear, hit);
 		return;
 	}
 
@@ -164,8 +178,8 @@ void CheckStuckTank(int client, const float pos[3])
 	float to[3];
 	GetClientAbsOrigin(client, to);
 	g_vLastPos[client] = to;
-	LogToFileEx(g_sLog, "frozen \"%N\" at=%.1f %.1f %.1f -> %.1f %.1f %.1f via %s%s",
-		client, pos[0], pos[1], pos[2], to[0], to[1], to[2], via, HullBlocked(client, to) ? " STILL STUCK" : "");
+	LogToFileEx(g_sLog, "frozen \"%N\" at=%.1f %.1f %.1f hit=%s -> %.1f %.1f %.1f via %s%s",
+		client, pos[0], pos[1], pos[2], hit, to[0], to[1], to[2], via, HullBlocked(client, to) ? " STILL STUCK" : "");
 }
 
 public Action L4D_OnTryOfferingTankBot(int tank_index, bool &enterStasis)
@@ -252,10 +266,12 @@ void Frame_Unstick(DataPack dp)
 	GetClientAbsOrigin(client, at);
 	if (!HullBlocked(client, at))
 		return;
+	char hit[32];
+	HitName(hit, sizeof(hit));
 
 	if (!g_cvUnstick.BoolValue)
 	{
-		LogToFileEx(g_sLog, "stuck \"%N\" at=%.1f %.1f %.1f old=%.1f %.1f %.1f (log only)", client, at[0], at[1], at[2], from[0], from[1], from[2]);
+		LogToFileEx(g_sLog, "stuck \"%N\" at=%.1f %.1f %.1f old=%.1f %.1f %.1f hit=%s (log only)", client, at[0], at[1], at[2], from[0], from[1], from[2], hit);
 		return;
 	}
 
@@ -280,8 +296,8 @@ void Frame_Unstick(DataPack dp)
 
 	float to[3];
 	GetClientAbsOrigin(client, to);
-	LogToFileEx(g_sLog, "stuck \"%N\" at=%.1f %.1f %.1f old=%.1f %.1f %.1f -> %.1f %.1f %.1f via %s%s",
-		client, at[0], at[1], at[2], from[0], from[1], from[2], to[0], to[1], to[2],
+	LogToFileEx(g_sLog, "stuck \"%N\" at=%.1f %.1f %.1f old=%.1f %.1f %.1f hit=%s -> %.1f %.1f %.1f via %s%s",
+		client, at[0], at[1], at[2], from[0], from[1], from[2], hit, to[0], to[1], to[2],
 		via, HullBlocked(client, to) ? " STILL STUCK" : "");
 }
 
@@ -290,6 +306,7 @@ void Frame_Unstick(DataPack dp)
 // known): no survivor-only PLAYERCLIP, plus MONSTERCLIP and the infected-only
 // team blockers.
 #define MASK_INFECTED_MOVE 0x0202520B
+int g_iLastHit = -1;
 
 bool HullBlocked(int client, const float pos[3])
 {
@@ -297,13 +314,28 @@ bool HullBlocked(int client, const float pos[3])
 	GetClientMins(client, mins);
 	GetClientMaxs(client, maxs);
 	TR_TraceHullFilter(pos, pos, mins, maxs, MASK_INFECTED_MOVE, TraceFilter_Solid, client);
-	return TR_DidHit() || TR_StartSolid();
+	bool blocked = TR_DidHit() || TR_StartSolid();
+	g_iLastHit = blocked ? TR_GetEntityIndex() : -1;
+	return blocked;
 }
 
-// Everything but the player itself and weapon spawns, which movement walks through.
+// What the last blocked HullBlocked hit: "world" or the entity's classname.
+void HitName(char[] buf, int len)
+{
+	if (g_iLastHit <= 0)
+		strcopy(buf, len, "world");
+	else if (IsValidEntity(g_iLastHit))
+		GetEntityClassname(g_iLastHit, buf, len);
+	else
+		Format(buf, len, "#%d", g_iLastHit);
+}
+
+// World, props, clips and blockers only: no players (the tank itself, its
+// teammates, survivors, the old tank's body after a pass), which a tank is not
+// stuck in, and no weapon spawns, which movement walks through.
 bool TraceFilter_Solid(int entity, int mask, int self)
 {
-	if (entity == self)
+	if (entity >= 1 && entity <= MaxClients)
 		return false;
 	if (entity > MaxClients && IsValidEntity(entity))
 	{
