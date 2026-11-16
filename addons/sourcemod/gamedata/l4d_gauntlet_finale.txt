@@ -18,6 +18,20 @@
 				"return"	"void"
 				"this"		"address"
 			}
+			"GF_BuildEscapeRoute"
+			{
+				"signature"	"ZombieManager::BuildEscapeRoute"
+				"callconv"	"thiscall"
+				"return"	"void"
+				"this"		"address"
+				"arguments"
+				{
+					"startArea"
+					{
+						"type"	"int"
+					}
+				}
+			}
 			"GF_RecomputeTeamScores"
 			{
 				"signature"	"CTerrorGameRules::RecomputeTeamScores"
@@ -85,6 +99,11 @@
 			{
 				"library"	"server"
 				"linux"		"@_ZN13TerrorNavMesh20ComputeFlowDistancesEv"
+			}
+			"ZombieManager::BuildEscapeRoute"
+			{
+				"library"	"server"
+				"linux"		"@_ZNK13ZombieManager16BuildEscapeRouteEP13TerrorNavArea"
 			}
 			"CTerrorGameRules::RecomputeTeamScores"
 			{
