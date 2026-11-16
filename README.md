@@ -19,6 +19,7 @@ Each plugin ships as source (`addons/sourcemod/scripting`) and compiled
 | `l4d_tank_burn_cap` | 1.0 | | Caps total fire damage on the tank so a molotov chips it instead of killing it. |
 | `l4d_vote_lock` | 1.0 | | Makes `!load`, `!match`, `!mode`, `!changemap`, `!cm` and `!setscores` admin only. An admin override does nothing on commands registered with `RegConsoleCmd`, so this uses a command listener instead. |
 | `l4d_hunter_phantom_fix` | 0.2 | | Stops a hunter killed mid-pounce from carrying on shredding (sound and claw blood at the pin spot) on clients after it dies. See below. |
+| `l4d_wallkick_reset` | 1.1 | Linux (checks the CLunge layout and refuses to load on any other) | A hunter that pinned someone, or scratched and bumped a survivor, can wall kick again after landing. Stock L4D1 keeps its "touched a player" flag until the next pounce from the ground, so a plain jump at a wall cannot be kicked off. See below. |
 | `l4d_tank_rules` | 1.3.1 | gamedata `l4d_tank_rules.txt` (Linux + Windows) | While a tank is alive: survivor distance points are frozen, and primary weapon swaps can be locked, limited to one per tank, or made to cost a full reload. See below. |
 | `l4d_ledge_fix` | 1.3 | left4dhooks, gamedata `l4d_ledge_fix.txt` | Blocks ledge hangs over drops that could not hurt (a survivor hanging off a rock a few units above the floor). See below. |
 | `l4d_fling_fall_fix` | 1.3 | | Stops survivors dying to "fell too far" from short drops after a tank punch: fall damage is taken from the speed gravity could give. See below. |
@@ -314,6 +315,27 @@ deaths with the swap, 12 in 187 without. A SourceTV demo (no loss) showed none.
 
 Cvars: `l4d_hunter_phantom_fix_enable` (1), `l4d_hunter_phantom_fix_delay` (0.2),
 `l4d_hunter_phantom_fix_hold` (1.0). `sm_phantomfix_stats` prints the swap count.
+
+## The hunter wall kick reset
+
+A hunter that touches a player loses its wall kick: Valve's `CLunge::OnTouch` sets `m_bTouchedPlayer`
+(`m_isLunging` + 16), and while it is set an airborne touch of the world no longer opens the 0.5 s
+wall-kick window. The flag is meant to last one flight, but the stock server clears it only when the
+ability is created and when a new pounce starts (`CLunge::OnCreate`, end of `CLunge::ActivateAbility`;
+checked by disassembly of the Linux server.so, no other writer). So after a pin, or a scratch that
+bumped a survivor, a hunter that simply jumps at a wall cannot kick off it until it pounces from the
+ground once.
+
+`l4d_wallkick_reset` clears the flag whenever the hunter stands on the ground and is not lunging.
+Touching a survivor during a jump or pounce still costs the kick off the next wall, as in stock.
+The shot-mid-pounce flag (`m_isLunging` + 1) is left alone; `l4d_pounceprotect` (SirPlease
+competitive rework) already handles that one.
+
+Tested with a bot hunter (3 trials per case, the full Rotoblin plugin set, versus): after touching a
+survivor, 0 of 3 wall kicks without the plugin, 3 of 3 with it; untouched hunters kick 3 of 3 either way.
+
+Cvars: `l4d_wallkick_reset_enable` (1), `l4d_wallkick_reset_debug` (0; 1 tells the hunter in chat when
+the flag was cleared).
 
 ## Tank rules
 
