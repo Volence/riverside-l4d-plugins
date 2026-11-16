@@ -20,6 +20,7 @@ Each plugin ships as source (`addons/sourcemod/scripting`) and compiled
 | `l4d_vote_lock` | 1.0 | | Makes `!load`, `!match`, `!mode`, `!changemap`, `!cm` and `!setscores` admin only. An admin override does nothing on commands registered with `RegConsoleCmd`, so this uses a command listener instead. |
 | `l4d_hunter_phantom_fix` | 0.2 | | Stops a hunter killed mid-pounce from carrying on shredding (sound and claw blood at the pin spot) on clients after it dies. See below. |
 | `l4d_wallkick_reset` | 1.1 | Linux (checks the CLunge layout and refuses to load on any other) | A hunter that pinned someone, or scratched and bumped a survivor, can wall kick again after landing. Stock L4D1 keeps its "touched a player" flag until the next pounce from the ground, so a plain jump at a wall cannot be kicked off. See below. |
+| `l4d_smg_common_bonus` | 1.0 | sdkhooks | Uzi bullets do extra damage to common infected only (`l4d_smg_common_bonus`, default 1.25). Special infected, tanks and witches take stock Uzi damage. A buff for clearing horde that leaves the SI fights alone. See below. |
 | `l4d_tank_rules` | 1.3.1 | gamedata `l4d_tank_rules.txt` (Linux + Windows) | While a tank is alive: survivor distance points are frozen, and primary weapon swaps can be locked, limited to one per tank, or made to cost a full reload. See below. |
 | `l4d_ledge_fix` | 1.3 | left4dhooks, gamedata `l4d_ledge_fix.txt` | Blocks ledge hangs over drops that could not hurt (a survivor hanging off a rock a few units above the floor). See below. |
 | `l4d_fling_fall_fix` | 1.3 | | Stops survivors dying to "fell too far" from short drops after a tank punch: fall damage is taken from the speed gravity could give. See below. |
@@ -923,6 +924,30 @@ with `KeyValues.GetString`, which returns only the first key. As a result only `
 `filter_activator_class` were hooked, and `filter_activator_model` was not. This version builds
 the class table into the plugin, hooks in `OnEntityCreated` instead of one sweep at map start,
 and takes the `AcceptInput` offset from SourceMod's `sdktools.games`, so there is no gamedata file.
+
+## Uzi bonus against commons
+
+On our servers the Uzi was picked in about 2.5% of survivor rounds. The same players cleared about 9%
+fewer commons with it than with the pump shotgun, while their SI damage was even and their tank damage
+was about 7% higher. A flat damage raise (Rotoblin-AZ's Uzi at 24) buffs the SI and tank fights too,
+which is what made it unpleasant to play against.
+
+`l4d_smg_common_bonus` hooks damage on `infected` entities only (commons; the witch is its own
+`witch` class, and SI and tanks are players), and multiplies a survivor's bullet damage when the
+shooter's active weapon is `weapon_smg`.
+
+Why 1.25: commons have 50 HP (`z_health`), body shots take full damage on Normal and any headshot
+kills. Uzi damage arrives with range falloff already applied (20 x 0.78 per 500 units with our
+`RangeModifier`). At 1.25 the Uzi still needs 3 body shots up close but keeps 3 out to about 815
+units instead of about 370. 1.4 is the first value that gives 2-shot body kills (inside about 230
+units), which is a much bigger jump.
+
+Tested with a scripted survivor firing a real Uzi (the full Rotoblin plugin set, coop): common body
+hits averaged 16.6 without the plugin and 20.9 with it, every hit scaled by exactly 1.250; tank
+19.0 either way, hunter 21.1 vs 20.1 (hit location noise).
+
+Cvars: `l4d_smg_common_bonus` (1.25; 1.0 is stock), `l4d_smg_common_bonus_debug` (0; 1 prints each
+scaled hit, with distance, to the server console).
 
 ## Tools
 
