@@ -27,7 +27,7 @@ Each plugin ships as source (`addons/sourcemod/scripting`) and compiled
 | `l4d_tank_punch_wall_fix` | 1.1 | DHooks, gamedata `l4d_tank_punch_wall_fix.txt` | A tank punch can no longer hit a survivor through a wall when something (a ladder, door, prop, common) stands in front of the wall. See below. |
 | `l4d_pounce_land_fix` | 1.0 | gamedata `l4d_pounce_land_fix.txt` (Linux) | A hunter whose pounce lands on a survivor's head can no longer start a second pounce before the pin goes through, which lost the pin or reset its damage to 1. See below. |
 | `l4d_physenv_teardown_fix` | 1.0 | gamedata `l4d_physenv_teardown_fix.txt` (Linux + Windows) | Closes a rare crash in vphysics at a level change (a use-after-free while the physics world is torn down). Any map can in theory hit it; we have not seen it on our live servers. See below. |
-| `l4d_tank_fair_punch` | 0.4.0 | DHooks, gamedata `l4d_tank_fair_punch.txt` | The windup-end target scan follows the fist: no free hit on a survivor the fist never came near, and a hit for one the fist visibly went through at the end of the windup. See below. |
+| `l4d_tank_fair_punch` | 0.5.0 | DHooks, gamedata `l4d_tank_fair_punch.txt` | The windup-end target scan follows the fist: no free hit on a survivor the fist never came near, and a hit for one the fist visibly went through at the end of the windup. See below. |
 | `l4d_rock_double_fix` | 1.0 | DHooks, gamedata `l4d_rock_double_fix.txt` | One tank rock can no longer hurt a survivor twice in the same tick. See below. |
 | `l4d_tongue_target` | 0.3 | DHooks, gamedata `l4d_tongue_target.txt` | When the smoker's crosshair is on several survivors, the nearest one gets the tongue (stock picks by client order), and survivors are judged where the smoker saw them. See below. |
 | `l4d_tank_pass_fix` | 0.4 | left4dhooks | A passed tank no longer bounces to a third player 3 s later. About one human pass in ten, the old tank's offer fires a second lottery at the handoff; an offer for a human tank within one lottery of the last is that duplicate and is blocked. Every offer is logged to `logs/tank_pass_fix.log` (`l4d_tank_pass_fix 0` logs only). 0.3: a tank stuck in a prop or wall (the engine's stuck state, 1 s without moving) goes back to its last clear spot instead of waiting 5 s for the stock warp onto a teammate, which could be thousands of units away; a passed tank that comes up inside a prop is covered too (`l4d_tank_pass_fix_unstick`, 1 on, 0 logs only). 0.4: the stuck test ignores players, so a survivor, teammate or ghost touching a passed tank no longer reads as stuck, and the log names what the hull hit. |
@@ -569,6 +569,11 @@ came within the fist radius of a standing survivor in the last
 `l4d_tank_fair_punch_add_time` (0.25 s) of the windup, in front of the tank and in its
 line of sight, the sweep starts at him, as the scan would have done. Distances use
 survivor positions rewound by the tank's latency and lerp.
+
+When the scan found nobody, or only an incapped survivor, the first sweep still runs along
+a line the fist was never on, and it can hit a standing survivor there.
+`l4d_tank_fair_punch_line_veto` judges those: 0 ignores them, 1 logs what it would do (we
+run 1 for now), 2 starts that sweep at the fist, as a veto does (needs mode 2).
 
 `l4d_tank_fair_punch_mode`: 0 off, 1 log only, 2 on (we run 2). `l4d_tank_fair_punch_log`
 and `_log_all` write `logs/tank_fair_punch.log`, with a line per punch and nearby
