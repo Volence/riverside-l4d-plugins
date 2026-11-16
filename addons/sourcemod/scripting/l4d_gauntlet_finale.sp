@@ -60,7 +60,7 @@
 #include <dhooks>
 #include <left4dhooks>
 
-#define PLUGIN_VERSION			"1.6"
+#define PLUGIN_VERSION			"1.7"
 #define TEAM_SURVIVOR			2
 #define TEAM_INFECTED			3
 #define ZC_TANK					5
@@ -90,8 +90,9 @@ ConVar g_cvNoEscapeTank;
 KeyValues g_hMIData;
 Handle g_hStopPanicEvent;
 
-DynamicDetour g_hIsBlocked;		// on only while ComputeFlowDistances runs on a gauntlet map
+DynamicDetour g_hIsBlocked;		// on only while ComputeFlowDistances or BuildEscapeRoute runs on a gauntlet map
 bool g_bIsBlockedOn;
+int g_iUnblockDepth;			// ComputeFlowDistances / BuildEscapeRoute calls in progress that want it on
 bool g_bMap;					// this map has "gauntlet_finale" "1"
 bool g_bHaveTankPos;
 bool g_bTankWait;				// "gauntlet_tank_wait" "1": the tank waits for the commons to die
@@ -146,6 +147,9 @@ public void OnPluginStart()
 	d = DynamicDetour.FromConf(gd, "GF_ComputeFlowDistances");
 	if (!d || !d.Enable(Hook_Pre, ComputeFlow_Pre) || !d.Enable(Hook_Post, ComputeFlow_Post))
 		SetFailState("ComputeFlowDistances detour");
+	d = DynamicDetour.FromConf(gd, "GF_BuildEscapeRoute");
+	if (!d || !d.Enable(Hook_Pre, ComputeFlow_Pre) || !d.Enable(Hook_Post, ComputeFlow_Post))
+		SetFailState("BuildEscapeRoute detour");
 	g_hIsBlocked = DynamicDetour.FromConf(gd, "GF_IsBlocked");
 	if (!g_hIsBlocked) SetFailState("IsBlocked detour");
 	d = DynamicDetour.FromConf(gd, "GF_RecomputeTeamScores");
@@ -259,17 +263,28 @@ bool MapGoal(float goal[3])
 	return use;
 }
 
+// Pre/post of TerrorNavMesh::ComputeFlowDistances and ZombieManager::BuildEscapeRoute: no area counts as blocked
+// while either runs. The escape route is rebuilt right after the flow (TerrorNavMesh::RecomputeFlowDistances), and
+// with the finale door's nav block honoured it found no path to the gauntlet goal: "BuildEscapeRoute failed. No path
+// from start to end", a 3-area route in half 2 of match aeb09439 (hf04, 2026-11-15, l4d_consistent_escaperoute's
+// "Unexpected mismatching escape route"; 231 areas in half 1) and 7 failures across both halves of a cwm4 match on
+// 11-11. The route places the versus witch and tank and the line of scrimmage, so it must follow the same path as
+// the flow.
 MRESReturn ComputeFlow_Pre(Address pThis)
 {
 	float goal[3];
-	if (MapGoal(goal) && !g_bIsBlockedOn)
+	if (!MapGoal(goal))
+		return MRES_Ignored;
+	if (g_iUnblockDepth++ == 0 && !g_bIsBlockedOn)
 		g_bIsBlockedOn = g_hIsBlocked.Enable(Hook_Pre, IsBlocked_Pre);
 	return MRES_Ignored;
 }
 
 MRESReturn ComputeFlow_Post(Address pThis)
 {
-	if (g_bIsBlockedOn)
+	if (g_iUnblockDepth == 0)
+		return MRES_Ignored;
+	if (--g_iUnblockDepth == 0 && g_bIsBlockedOn)
 		g_bIsBlockedOn = !g_hIsBlocked.Disable(Hook_Pre, IsBlocked_Pre);
 	return MRES_Ignored;
 }
