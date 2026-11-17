@@ -21,6 +21,7 @@ Each plugin ships as source (`addons/sourcemod/scripting`) and compiled
 | `l4d_hunter_phantom_fix` | 0.2 | | Stops a hunter killed mid-pounce from carrying on shredding (sound and claw blood at the pin spot) on clients after it dies. See below. |
 | `l4d_wallkick_reset` | 1.1 | Linux (checks the CLunge layout and refuses to load on any other) | A hunter that pinned someone, or scratched and bumped a survivor, can wall kick again after landing. Stock L4D1 keeps its "touched a player" flag until the next pounce from the ground, so a plain jump at a wall cannot be kicked off. See below. |
 | `l4d_smg_common_bonus` | 1.0 | sdkhooks | Uzi bullets do extra damage to common infected only (`l4d_smg_common_bonus`, default 1.25). Special infected, tanks and witches take stock Uzi damage. A buff for clearing horde that leaves the SI fights alone. See below. |
+| `l4d_baseline_keep` | 1.1 | Linux, engine.so md5 `9ee78e2fd274e0639e3aae704f2d7b1f` (checks every byte and refuses to patch on any other); gamedata `l4d_baseline_keep.txt` | Fixes a stock engine bug that can leave special infected invisible to one player after that player lags for about a second. See below. |
 | `l4d_tank_rules` | 1.3.1 | gamedata `l4d_tank_rules.txt` (Linux + Windows) | While a tank is alive: survivor distance points are frozen, and primary weapon swaps can be locked, limited to one per tank, or made to cost a full reload. See below. |
 | `l4d_ledge_fix` | 1.3 | left4dhooks, gamedata `l4d_ledge_fix.txt` | Blocks ledge hangs over drops that could not hurt (a survivor hanging off a rock a few units above the floor). See below. |
 | `l4d_fling_fall_fix` | 1.3 | | Stops survivors dying to "fell too far" from short drops after a tank punch: fall damage is taken from the speed gravity could give. See below. |
@@ -948,6 +949,43 @@ hits averaged 16.6 without the plugin and 20.9 with it, every hit scaled by exac
 
 Cvars: `l4d_smg_common_bonus` (1.25; 1.0 is stock), `l4d_smg_common_bonus_debug` (0; 1 prints each
 scaled hit, with distance, to the server console).
+
+## Invisible infected after a lag spike
+
+A player sometimes sees a special infected (most often a hunter) with no model: it pounces or
+scratches them, but nothing is drawn. Stock servers rarely show it. Any plugin that keeps ghosts out of
+survivors' snapshots (anti-wallhack) makes it common.
+
+Cause (stock engine bug): when a client stops acking for longer than the server's frame history
+(`sv_maxclientframes`, 128 snapshots, about 1 s at 128 tick), `CBaseClient::SendSnapshot` has no
+frame to delta from, so it sends an uncompressed update, and also frees that client's per-entity
+baselines. The client did not ask for a full update, so it keeps its own baselines. From then on the
+two sides disagree: an entity that is not in that update and enters the client's snapshot later is
+encoded by the server against the class baseline, but decoded by the client onto its old per-entity
+baseline. If that old baseline was the infected as a ghost, the client keeps `m_isGhost 1` on the
+live infected and does not draw it. The player can clear it with `record x; stop` (or
+`cl_fullupdate` with cheats), which makes the client ask for a real full update.
+
+`l4d_baseline_keep` patches three sites in engine.so:
+- `SendSnapshot` (2 sites): free the baselines only when `m_nDeltaTick == -1`, which is when the client
+  really asked for a full update (or just connected). A client that only fell out of the history keeps
+  its baselines on both sides.
+- `UpdateAcknowledgedFramecount` (1 site): if the client acks -1 while the server is still waiting
+  for its reliable full update (the client gave up after 4 s without packets, or ran `record`), free
+  the baselines there. Stock got away without this because it had already freed them in
+  `SendSnapshot`.
+
+Every patched byte, every jump target and the code the new jumps run through is compared with the
+original first. If anything differs, nothing is written and `sm_baselinekeep_status` says why. The
+original bytes come back on `l4d_baseline_keep_enable 0` and on unload. Linux only, and only the
+engine.so with the md5 above (the current Steam L4D1 dedicated server).
+
+Tested at 128 tick with two real clients. On the bench (a ghost seen, then a 4 s client freeze):
+stock 8/8 invisible, patched 0/20, controls 0/8. A 6 s server-to-client packet drop: 1.0 (sites 1
+and 2 only) 4/4, 1.1 0/12. Live over the internet: stock 5/5, patched 0/16. Record, `cl_fullupdate`,
+reconnects, map changes and SourceTV all behave as before.
+
+Cvars: `l4d_baseline_keep_enable` (1). Command: `sm_baselinekeep_status` (rcon flag).
 
 ## Tools
 
