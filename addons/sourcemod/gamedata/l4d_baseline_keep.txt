@@ -1,0 +1,76 @@
+"Games"
+{
+	"left4dead"
+	{
+		// l4d_baseline_keep: engine.so md5 9ee78e2fd274e0639e3aae704f2d7b1f (bench and all five
+		// live servers, 2026-11-15). CBaseClient::SendSnapshot is at file address 0x915f8,
+		// CBaseClient::UpdateAcknowledgedFramecount at 0x904ca.
+		// The plugin checks every byte it touches, the je into the block and both jump targets
+		// before writing anything; on any difference it refuses to load.
+		"Addresses"
+		{
+			"SendSnapshot"
+			{
+				"linux"
+				{
+					"signature"	"CBaseClient::SendSnapshot"
+				}
+			}
+			"UpdateAcknowledgedFramecount"
+			{
+				"linux"
+				{
+					"signature"	"CBaseClient::UpdateAcknowledgedFramecount"
+				}
+			}
+		}
+		"Offsets"
+		{
+			// 0x91b78: start of the "no delta frame" block (mov eax,[esi+0xec] ...), 15 bytes patched
+			"site_free_check"
+			{
+				"linux"		"1408"
+			}
+			// 0x91c05: DevMsg("Sending full update to Client %s (%s)") call setup, 5 bytes patched
+			"site_devmsg"
+			{
+				"linux"		"1549"
+			}
+			// 0x91713: first instruction after the block (the stock block ends with jmp here)
+			"target_resume"
+			{
+				"linux"		"283"
+			}
+			// 0x91bb8: m_pLastSnapshot release, FreeBaselines, new empty m_pBaseline (stock reset)
+			"target_free"
+			{
+				"linux"		"1472"
+			}
+			// UpdateAcknowledgedFramecount (0x904ca) +0x172 = 0x9063c: ack -1 while a reliable full update
+			// is pending (mov dword [esi+0xec],-1 ; jmp short), 12 bytes patched
+			"site_ack_wait"
+			{
+				"linux"		"370"
+			}
+			// +0x81 = 0x9054b: stock "forced immediate full update" tail (release m_pLastSnapshot,
+			// FreeBaselines, new empty m_pBaseline, DevMsg, return 1)
+			"target_ack_free"
+			{
+				"linux"		"129"
+			}
+		}
+		"Signatures"
+		{
+			"CBaseClient::SendSnapshot"
+			{
+				"library"	"engine"
+				"linux"		"@_ZN11CBaseClient12SendSnapshotEP12CClientFrame"
+			}
+			"CBaseClient::UpdateAcknowledgedFramecount"
+			{
+				"library"	"engine"
+				"linux"		"@_ZN11CBaseClient28UpdateAcknowledgedFramecountEi"
+			}
+		}
+	}
+}
