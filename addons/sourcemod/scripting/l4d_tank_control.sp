@@ -13,15 +13,35 @@ native Is_Ready_Plugin_On();
 // tanks this map, or 0 for no plan. Optional, marked in AskPluginLoad2.
 native int PUG_PlannedTank();
 
-static	queuedTank, String:tankSteamId[32], Handle:hTeamTanks, Handle:hTeamFinalTanks;
+static	queuedTank, Handle:hTeamTanks, Handle:hTeamFinalTanks;
 ConVar g_hCvarInfLimit, g_hCvarSurLimit;
 static		bool:IsSecondTank,bool:IsFinal;	
 static Handle:hPreviousMapTeamTanks;
+
+// riverside2: where queuedTank came from, so a re-pick can be given back
+enum
+{
+	QT_NONE = 0,
+	QT_PLAN,	// pug-match tank order (SR rank slot)
+	QT_RANDOM,	// upstream "everyone once" random pick
+	QT_ADMIN	// sm_settankplayer
+}
+static int g_iQueuedSource;
+// riverside2 (upstream 2.4's idea): Steam2 id of the half's first random pick, so a fallback pick who drops
+// and comes back before the first tank gets it back. Cleared once the first tank is handed out.
+static char g_sFirstPickSteamId[32];
+// riverside2: hunter first. g_bHalfLive: l4dready's go-live (or leaving the start area without it).
+// g_bFirstSpawned: the half's first SI or tank has materialized; nothing is swapped after that.
+static bool g_bHalfLive, g_bFirstSpawned;
+ConVar g_hCvarHunterFirst, g_hCvarHunterLimit, g_hCvarSmokerLimit, g_hCvarBoomerLimit;
+
+#define HUNTER_FIRST_DELAY	0.3	// after QuadCaps' 0.1 s ghost class checks (COLD_DOWN, KeepSIStarting)
+
 public Plugin:myinfo = {
 	name = "L4D Tank Control",
 	author = "Jahze, vintik, raziEiL [disawar1], Harry Potter",
-	version = "2.3-riverside1",
-	description = "Forces each player to play the tank at least once before Map change. Riverside: PUG matches pick by SR rank slot (pug-match)."
+	version = "2.3-riverside2",
+	description = "Forces each player to play the tank at least once before Map change. Riverside: PUG matches pick by SR rank slot (pug-match); the planned tank is given back if he returns; the map's first tank starts the half as a hunter."
 };
 
 static bool:g_bCvartankcontroldisable,Handle:hCvarFlags;
@@ -50,6 +70,8 @@ public Native_WhoIsTank(Handle:plugin, numParams)
 
 public Native_ChoseTankPrintWhoBecome(Handle:plugin, numParams)
 {
+	// riverside2: l4dready calls this from its go-live (RoundIsLive) only
+	g_bHalfLive = true;
 	if (IsPluginDisabled()) return;
 	
 	if(queuedTank > 0 && IsClientInGame(queuedTank) && GetClientTeam(queuedTank) == 3)
@@ -57,6 +79,7 @@ public Native_ChoseTankPrintWhoBecome(Handle:plugin, numParams)
 		decl String:queuedTankName[128];
 		GetClientName(queuedTank,queuedTankName,128);
 		CPrintToChatAll("%t","player will be the tank", queuedTankName); 
+		QueueHunterFirst(queuedTank);
 	}
 	else
 		ChoseTankAndPrintWhoBecome();
@@ -71,6 +94,10 @@ public OnPluginStart()
 	hCvarFlags = CreateConVar("tank_control_disable", "0", "if set, no Forces each player to play the tank at once,1=disabled", CVAR_FLAGS, true, 0.0, true, 1.0);
 	g_bCvartankcontroldisable = GetConVarBool(hCvarFlags);
 	HookConVarChange(hCvarFlags, OnCvarChange_tank_control_disable);
+	g_hCvarHunterFirst = CreateConVar("tank_control_hunter_first", "1", "1 = the map's first tank starts the half as a hunter: before the half's first spawn his ghost class is swapped with a teammate's hunter ghost (class counts unchanged)", CVAR_FLAGS, true, 0.0, true, 1.0);
+	g_hCvarHunterLimit = FindConVar("z_hunter_limit");
+	g_hCvarSmokerLimit = FindConVar("z_versus_smoker_limit");
+	g_hCvarBoomerLimit = FindConVar("z_versus_boomer_limit");
 
 	HookEvent("player_team", TC_ev_OnTeamChange);
 	HookEvent("player_left_start_area", TC_ev_LeftStartAreaEvent, EventHookMode_PostNoCopy);
@@ -95,7 +122,10 @@ public OnPluginStart()
 public TC_ev_LeftStartAreaEvent(Handle:event, String:name[], bool:dontBroadcast)
 {
 	if(!Is_Ready_Plugin_On())
+	{
+		g_bHalfLive = true;
 		ChoseTankAndPrintWhoBecome();
+	}
 }
 
 public Action:Command_SetTank(client, args)
@@ -141,9 +171,12 @@ public Action:Command_SetTank(client, args)
 	}
 	
 	queuedTank = player_id;
+	g_iQueuedSource = QT_ADMIN;
 	decl String:queuedTankName[128];
 	GetClientName(queuedTank,queuedTankName,128);
 	CPrintToChatAll("%t","l4d_tank_control2", queuedTankName); 
+	LogMessage("[tank_control] admin pick by %L: %L", client, queuedTank);
+	QueueHunterFirst(queuedTank);
 	
 	return Plugin_Handled;	
 }
@@ -248,34 +281,63 @@ public void TC_ev_PlayerSpawn(Event event, const char[] name, bool dontBroadcast
 	if (client && IsClientInGame(client) && !IsFakeClient(client) && GetClientTeam(client) == 3 && IsPlayerAlive(client) && IsPlayerTank(client))
 	{
 		queuedTank = 0;
+		g_iQueuedSource = QT_NONE;
 	}
+	// riverside2: the half's first SI or tank is out, so hunter first stops. Humans are caught by
+	// L4D_OnMaterializeFromGhost; bots (and a tank) never pass through a ghost.
+	if (g_bHalfLive && client && IsClientInGame(client) && GetClientTeam(client) == 3 && IsPlayerAlive(client)
+		&& (IsFakeClient(client) || IsPlayerTank(client)))
+		g_bFirstSpawned = true;
+}
+
+public void L4D_OnMaterializeFromGhost(int client)
+{
+	if (g_bHalfLive) g_bFirstSpawned = true;
 }
 
 public Action:TC_ev_RoundStart(Handle:event, const String:name[], bool:dontBroadcast)
 {
 	queuedTank = 0;
+	g_iQueuedSource = QT_NONE;
 	IsSecondTank = false;
+	g_sFirstPickSteamId[0] = '\0';
+	g_bHalfLive = false;
+	g_bFirstSpawned = false;
 }
 
 public TC_ev_OnTeamChange(Handle:event, String:name[], bool:dontBroadcast)
 {
 	if (IsPluginDisabled()) return;
 
-	new client = GetClientOfUserId(GetEventInt(event, "userid"));
-	CreateTimer(1.0,PlayerChangeTeamCheck,client);//延遲一秒檢查
+	// riverside2 (upstream 2.4): a userid, so the check one second later cannot hit a new client in the same slot
+	CreateTimer(1.0, PlayerChangeTeamCheck, GetEventInt(event, "userid"));//延遲一秒檢查
 }
-public Action:PlayerChangeTeamCheck(Handle:timer,any:client)
+public Action:PlayerChangeTeamCheck(Handle:timer, any:userid)
 {
-	if (client && client == queuedTank)
-		if(!IsClientInGame(client) || GetClientTeam(client)!=3)
-			ChoseTankAndPrintWhoBecome();
+	if (IsPluginDisabled()) return Plugin_Continue;
+	new client = GetClientOfUserId(userid);
+	if (!client || !IsClientInGame(client) || IsFakeClient(client)) return Plugin_Continue;	// a disconnect is OnClientDisconnect's
+	if (GetClientTeam(client) == 3)
+		TryRestoreFirstTank(client);
+	else if (client == queuedTank)
+		ChoseTankAndPrintWhoBecome();
+	return Plugin_Continue;
 }
 public OnClientDisconnect(client)
 {
-	if (IsPluginDisabled()) return;
+	if (IsPluginDisabled() || !IsClientInGame(client) || IsFakeClient(client)) return;
 
+	// riverside2: re-pick on the next frame, once he is gone. Still in game here, so pug-match's plan
+	// would hand the slot straight back to him instead of to a sub.
 	if (client && client == queuedTank)
-		ChoseTankAndPrintWhoBecome();
+		RequestFrame(Frame_RepickAfterLeave);
+}
+
+public void Frame_RepickAfterLeave(any unused)
+{
+	if (IsPluginDisabled() || queuedTank <= 0) return;
+	if (IsClientInGame(queuedTank) && !IsFakeClient(queuedTank) && GetClientTeam(queuedTank) == 3) return;	// already replaced
+	ChoseTankAndPrintWhoBecome();
 }
 
 ChoseTankAndPrintWhoBecome()
@@ -286,6 +348,7 @@ ChoseTankAndPrintWhoBecome()
 		decl String:queuedTankName[128];
 		GetClientName(queuedTank,queuedTankName,128);
 		CPrintToChatAll("%t","player will be the tank", queuedTankName); 
+		QueueHunterFirst(queuedTank);
 	}
 	else if (queuedTank==-1){
 		CPrintToChatAll("%t","l4d_tank_control3"); 
@@ -335,6 +398,9 @@ public void L4D_OnTryOfferingTankBot_Post(int tank_index, bool enterStasis)
 	if(L4D2Direct_GetTankPassedCount() >= 1)
 		return;	
 
+	// riverside2: the map's first tank goes to the planned slot's owner if he is here right now
+	if (!IsSecondTank) ReaskPlanBeforeFirstTank();
+
 	if(IsSecondTank && queuedTank<=0)//第二隻克以後
 	{
 		ChooseTank();
@@ -352,23 +418,27 @@ public void L4D_OnTryOfferingTankBot_Post(int tank_index, bool enterStasis)
 	if (queuedTank>0){
 		ForceTankPlayer(queuedTank);//強制該玩家當tank
 
-		GetClientAuthId(queuedTank, AuthId_Steam2, tankSteamId, sizeof(tankSteamId));
-		
-		if(HasBeenTank(tankSteamId) == false)
+		// riverside2 (upstream 2.4): skip the bookkeeping when the auth id cannot be read
+		decl String:sTankSteamId[32];
+		if (GetClientAuthId(queuedTank, AuthId_Steam2, sTankSteamId, sizeof(sTankSteamId)))
 		{
-			if(FindStringInArray(hTeamTanks, tankSteamId) == -1)
-				PushArrayString(hTeamTanks, tankSteamId);
+			if(HasBeenTank(sTankSteamId) == false)
+			{
+				if(FindStringInArray(hTeamTanks, sTankSteamId) == -1)
+					PushArrayString(hTeamTanks, sTankSteamId);
+			}
+			if(IsFinal)
+			{
+				if(FindStringInArray(hTeamFinalTanks, sTankSteamId) == -1)
+					PushArrayString(hTeamFinalTanks, sTankSteamId);
+			}
+				
+			if(FindStringInArray(hPreviousMapTeamTanks, sTankSteamId) == -1)
+				PushArrayString(hPreviousMapTeamTanks, sTankSteamId);
 		}
-		if(IsFinal)
-		{
-			if(FindStringInArray(hTeamFinalTanks, tankSteamId) == -1)
-				PushArrayString(hTeamFinalTanks, tankSteamId);
-		}
-			
-		if(FindStringInArray(hPreviousMapTeamTanks, tankSteamId) == -1)
-			PushArrayString(hPreviousMapTeamTanks, tankSteamId);
 	}
 	IsSecondTank = true;//已經第一隻Tank了
+	g_sFirstPickSteamId[0] = '\0';
 }
 
 public Action:KickBot(Handle:timer, any:client)
@@ -389,7 +459,8 @@ public Action:CheckForAITank(Handle:timer)
 			if (!IsFakeClient(i))//Tank is not AI
 			{
 				decl String:SteamId[32];
-				GetClientAuthId(i, AuthId_Steam2, SteamId, sizeof(SteamId));
+				if (!GetClientAuthId(i, AuthId_Steam2, SteamId, sizeof(SteamId)))
+					return Plugin_Handled;
 
 				if(HasBeenTank(SteamId) == false)
 				{
@@ -418,16 +489,17 @@ static ChooseFinalTank() {
 	new infectedplayer = 0;
 
 	for (new i = 1; i < MaxClients+1; i++) {
-		if (!IsClientConnected(i) || !IsClientInGame(i) ||IsFakeClient(i)) {
+		if (!IsClientInGame(i) ||IsFakeClient(i)) {
 			continue;
 		}
-		if(IsInfected(i))
-			infectedplayer++;
-		
 		if(!IsInfected(i))
 			continue;
 
-		GetClientAuthId(i, AuthId_Steam2, SteamId, sizeof(SteamId));
+		infectedplayer++;
+
+		if (!GetClientAuthId(i, AuthId_Steam2, SteamId, sizeof(SteamId))) {
+			continue;
+		}
 
 		if (HasBeenFinalTank(SteamId) || i == queuedTank) {
 			continue;
@@ -438,6 +510,8 @@ static ChooseFinalTank() {
 	}
 
 	if (GetArraySize(SteamIds) == 0) {//沒有人可以成為tank
+		CloseHandle(SteamIds);	// riverside2: was leaked on every call
+		g_iQueuedSource = QT_NONE;
 		if(infectedplayer == 0)//1.SI沒有人
 			queuedTank = -2;
 		else//2.代表兩邊的隊伍都找過 特感這裡所有人都當過tank
@@ -452,8 +526,11 @@ static ChooseFinalTank() {
 	int random = GetRandomInt(0, 2147483647);
 	SetRandomSeed(GetGameTickCount() + random);
 	int idx = GetRandomInt(0, GetArraySize(SteamIds)-1);
-	GetArrayString(SteamIds, idx, tankSteamId, sizeof(tankSteamId));
-	queuedTank = GetInfectedPlayerBySteamId(tankSteamId);
+	decl String:sTankSteamId[32];
+	GetArrayString(SteamIds, idx, sTankSteamId, sizeof(sTankSteamId));
+	CloseHandle(SteamIds);
+	queuedTank = GetInfectedPlayerBySteamId(sTankSteamId);
+	g_iQueuedSource = (queuedTank > 0) ? QT_RANDOM : QT_NONE;
 }
 
 static bool:HasBeenFinalTank(const String:SteamId[])
@@ -486,6 +563,7 @@ static bool:ChoosePlannedTank()
 	new planned = PUG_PlannedTank();
 	if (planned <= 0 || !IsClientInGame(planned) || GetClientTeam(planned) != 3) return false;
 	queuedTank = planned;
+	g_iQueuedSource = QT_PLAN;
 	LogMessage("[tank_control] planned pick (pug-match tank order): %L", planned);
 	return true;
 }
@@ -499,16 +577,17 @@ static ChooseTank() {
 	new infectedplayer = 0;
 
 	for (new i = 1; i < MaxClients+1; i++) {
-		if (!IsClientConnected(i) || !IsClientInGame(i) ||IsFakeClient(i)) {
+		if (!IsClientInGame(i) ||IsFakeClient(i)) {
 			continue;
 		}
-		if(IsInfected(i))
-			infectedplayer++;
-		
 		if(!IsInfected(i))
 			continue;
 
-		GetClientAuthId(i, AuthId_Steam2, SteamId, sizeof(SteamId));
+		infectedplayer++;
+
+		if (!GetClientAuthId(i, AuthId_Steam2, SteamId, sizeof(SteamId))) {
+			continue;
+		}
 
 		if (HasBeenTank(SteamId) || i == queuedTank) {
 			continue;
@@ -519,6 +598,8 @@ static ChooseTank() {
 	}
 
 	if (GetArraySize(SteamIds) == 0) {//沒有人可以成為tank
+		CloseHandle(SteamIds);	// riverside2: was leaked on every call
+		g_iQueuedSource = QT_NONE;
 		if(infectedplayer == 0)//1.SI沒有人
 			queuedTank = -2;
 		else//2.代表兩邊的隊伍都找過 特感這裡所有人都當過tank
@@ -533,14 +614,23 @@ static ChooseTank() {
 	int random = GetRandomInt(0, 2147483647);
 	SetRandomSeed(GetGameTickCount() + random);
 	int idx = GetRandomInt(0, GetArraySize(SteamIds)-1);
-	GetArrayString(SteamIds, idx, tankSteamId, sizeof(tankSteamId));
-	queuedTank = GetInfectedPlayerBySteamId(tankSteamId);
-	if (queuedTank > 0) LogMessage("[tank_control] random pick (not tanked yet, %d candidates): %L", GetArraySize(SteamIds), queuedTank);
+	decl String:sTankSteamId[32];
+	GetArrayString(SteamIds, idx, sTankSteamId, sizeof(sTankSteamId));
+	queuedTank = GetInfectedPlayerBySteamId(sTankSteamId);
+	g_iQueuedSource = (queuedTank > 0) ? QT_RANDOM : QT_NONE;
+	if (queuedTank > 0)
+	{
+		LogMessage("[tank_control] random pick (not tanked yet, %d candidates): %L", GetArraySize(SteamIds), queuedTank);
+		// riverside2: the half's first random pick gets it back if he drops and returns before the first tank
+		if (!IsSecondTank && g_sFirstPickSteamId[0] == '\0')
+			strcopy(g_sFirstPickSteamId, sizeof(g_sFirstPickSteamId), sTankSteamId);
+	}
+	CloseHandle(SteamIds);
 }
 
 static ForceTankPlayer(iTank) {
 	for (new i = 1; i < MaxClients+1; i++) {
-		if (!IsClientConnected(i) || !IsClientInGame(i)) {
+		if (!IsClientInGame(i)) {
 			continue;
 		}
 
@@ -559,15 +649,13 @@ static GetInfectedPlayerBySteamId(const String:SteamId[]) {
 	decl String:cmpSteamId[32];
 
 	for (new i = 1; i < MaxClients+1; i++) {
-		if (!IsClientConnected(i)) {
-			continue;
-		}
-
 		if (!IsInfected(i)) {
 			continue;
 		}
 
-		GetClientAuthId(i, AuthId_Steam2, cmpSteamId, sizeof(cmpSteamId));
+		if (!GetClientAuthId(i, AuthId_Steam2, cmpSteamId, sizeof(cmpSteamId))) {
+			continue;
+		}
 
 		if (StrEqual(SteamId, cmpSteamId)) {
 			return i;
@@ -581,11 +669,13 @@ static GetPlayerBySteamId(const String:SteamId[]) {
 	decl String:cmpSteamId[32];
 
 	for (new i = 1; i < MaxClients+1; i++) {
-		if (!IsClientConnected(i)) {
+		if (!IsClientInGame(i)) {
 			continue;
 		}
 
-		GetClientAuthId(i, AuthId_Steam2, cmpSteamId, sizeof(cmpSteamId));
+		if (!GetClientAuthId(i, AuthId_Steam2, cmpSteamId, sizeof(cmpSteamId))) {
+			continue;
+		}
 
 		if (StrEqual(SteamId, cmpSteamId)) {
 			return i;
@@ -593,6 +683,217 @@ static GetPlayerBySteamId(const String:SteamId[]) {
 	}
 
 	return 0;
+}
+
+/**
+ * riverside2: keep the planned tank. Upstream re-picks at random when the queued tank leaves the infected
+ * team (disconnect, crash, a spell in spectate) and never gives it back, so in a PUG a teammate of another
+ * SR rank tanked the map while the other team's same-rank player still did. A player joining the infected
+ * team before the map's first tank is handed out gets it back when he is the plan's pick (or, with no plan,
+ * the half's first random pick).
+ *
+ * pug-match's PUG_PlannedTank() returns the slot's owner whenever he is on the infected side, else a random
+ * unslotted player (a sub). A tank the plan already chose who is still on the team is only replaced by the
+ * player who just joined, so two subs cannot keep trading the slot on every team change.
+ */
+static bool PlanAvailable()
+{
+	return GetFeatureStatus(FeatureType_Native, "PUG_PlannedTank") == FeatureStatus_Available;
+}
+
+static bool IsInfectedHuman(int client)
+{
+	return client > 0 && client <= MaxClients && IsClientInGame(client) && !IsFakeClient(client) && GetClientTeam(client) == 3;
+}
+
+static void TryRestoreFirstTank(int joined)
+{
+	if (IsSecondTank || queuedTank == 0) return;	// 0: nobody chosen yet this half, go-live will ask the plan
+	if (g_iQueuedSource == QT_ADMIN && IsInfectedHuman(queuedTank)) return;
+
+	int want = 0;
+	char why[48];
+	if (PlanAvailable())
+	{
+		int planned = PUG_PlannedTank();
+		if (planned > 0)
+		{
+			if (planned == queuedTank || !IsInfectedHuman(planned)) return;
+			if (g_iQueuedSource == QT_PLAN && IsInfectedHuman(queuedTank) && planned != joined) return;
+			want = planned;
+			strcopy(why, sizeof(why), "pug-match tank order");
+		}
+	}
+	if (want == 0 && g_sFirstPickSteamId[0] != '\0' && joined != queuedTank)
+	{
+		char sid[32];
+		if (GetClientAuthId(joined, AuthId_Steam2, sid, sizeof(sid)) && StrEqual(sid, g_sFirstPickSteamId))
+		{
+			want = joined;
+			strcopy(why, sizeof(why), "first random pick returned");
+		}
+	}
+	if (want == 0) return;
+
+	if (queuedTank > 0 && IsClientInGame(queuedTank))
+		LogMessage("[tank_control] restore (%s): %L, was %L", why, want, queuedTank);
+	else
+		LogMessage("[tank_control] restore (%s): %L, was none (%d)", why, want, queuedTank);
+	queuedTank = want;
+	g_iQueuedSource = StrEqual(why, "pug-match tank order") ? QT_PLAN : QT_RANDOM;
+	char name[128];
+	GetClientName(want, name, sizeof(name));
+	CPrintToChatAll("%t", "player will be the tank", name);
+	QueueHunterFirst(want);
+}
+
+/** The first tank is being offered: last chance for the slot owner who is here now. */
+static void ReaskPlanBeforeFirstTank()
+{
+	if (!PlanAvailable()) return;
+	if (g_iQueuedSource == QT_ADMIN && IsInfectedHuman(queuedTank)) return;
+	if (g_iQueuedSource == QT_PLAN && IsInfectedHuman(queuedTank)) return;	// already the plan's (owner or sub)
+	int planned = PUG_PlannedTank();
+	if (planned <= 0 || planned == queuedTank || !IsInfectedHuman(planned)) return;
+	if (queuedTank > 0 && IsClientInGame(queuedTank))
+		LogMessage("[tank_control] restore (plan re-asked at first tank): %L, was %L", planned, queuedTank);
+	else
+		LogMessage("[tank_control] restore (plan re-asked at first tank): %L, was none (%d)", planned, queuedTank);
+	queuedTank = planned;
+	g_iQueuedSource = QT_PLAN;
+}
+
+/**
+ * riverside2: hunter first (owner request 2026-11-18). The map's first tank starts the half as a hunter, so
+ * the team's smoker or boomer is not the one who turns into the tank. The first attack keeps its stock
+ * composition: his ghost class is SWAPPED with a teammate ghost holding a hunter, never added. Each swap
+ * moves m_classSpawnCount the way QuadCaps' Timer_DirtyBoomer does (the dealt class -1, the new one +1), so
+ * stock rotation stays fair. Only ghosts, only before the half's first SI or tank is out, never a tank.
+ *
+ * QuadCaps: a swap leaves the team's class counts as they were, so its go-live snapshot (KeepSIStarting) and
+ * its half-two ready-up count enforcement (Sub_DetermineClass) read the same numbers; its dirty boomer and
+ * no-quad rules start from SI deaths in a live half, and none has happened before the first spawn.
+ */
+static void QueueHunterFirst(int client)
+{
+	if (client > 0 && IsClientInGame(client))
+		CreateTimer(HUNTER_FIRST_DELAY, Timer_HunterFirst, GetClientUserId(client), TIMER_FLAG_NO_MAPCHANGE);
+}
+
+public Action Timer_HunterFirst(Handle timer, any userid)
+{
+	int client = GetClientOfUserId(userid);
+	if (client > 0 && client == queuedTank)	// still the queued tank 0.3 s later
+		HunterFirst(client);
+	return Plugin_Continue;
+}
+
+public void L4D_OnEnterGhostState(int client)
+{
+	if (IsPluginDisabled() || !g_hCvarHunterFirst.BoolValue || IsSecondTank || g_bFirstSpawned) return;
+	if (!IsInfectedHuman(client)) return;
+	CreateTimer(HUNTER_FIRST_DELAY, Timer_GhostHunterFirst, GetClientUserId(client), TIMER_FLAG_NO_MAPCHANGE);
+}
+
+public Action Timer_GhostHunterFirst(Handle timer, any userid)
+{
+	if (IsPluginDisabled() || IsSecondTank || g_bFirstSpawned) return Plugin_Continue;
+	if (!GetClientOfUserId(userid)) return Plugin_Continue;
+	int tank = queuedTank;
+	// ready-up: the tank is chosen at go-live, but with a plan the players can see their real class now
+	if (tank <= 0 && !g_bHalfLive && PlanAvailable())
+		tank = PUG_PlannedTank();
+	if (tank > 0) HunterFirst(tank);
+	return Plugin_Continue;
+}
+
+static bool IsHumanGhost(int client)
+{
+	return IsInfectedHuman(client) && IsPlayerAlive(client) && GetEntProp(client, Prop_Send, "m_isGhost") == 1;
+}
+
+static int ZClass(int client)
+{
+	return GetEntProp(client, Prop_Send, "m_zombieClass");
+}
+
+static void ClassName(int zclass, char[] buf, int len)
+{
+	switch (zclass)
+	{
+		case ZC_SMOKER: strcopy(buf, len, "Smoker");
+		case ZC_BOOMER: strcopy(buf, len, "Boomer");
+		case ZC_HUNTER: strcopy(buf, len, "Hunter");
+		case ZC_TANK:   strcopy(buf, len, "Tank");
+		default:        FormatEx(buf, len, "class %d", zclass);
+	}
+}
+
+/** Move this life's spawn count from the dealt class to the new one, then change the ghost's class. */
+static void SetGhostClass(int client, int from, int to)
+{
+	int n = GetEntProp(client, Prop_Send, "m_classSpawnCount", 4, from);
+	if (n > 0) SetEntProp(client, Prop_Send, "m_classSpawnCount", n - 1, 4, from);
+	SetEntProp(client, Prop_Send, "m_classSpawnCount", GetEntProp(client, Prop_Send, "m_classSpawnCount", 4, to) + 1, 4, to);
+	L4D_SetClass(client, to);
+}
+
+static void HunterFirst(int tank)
+{
+	if (IsPluginDisabled() || !g_hCvarHunterFirst.BoolValue || IsSecondTank || g_bFirstSpawned) return;
+	if (!IsHumanGhost(tank)) return;	// not a ghost yet (or spawned): his own ghost entry comes back here
+	int tankClass = ZClass(tank);
+	if (tankClass == ZC_HUNTER || tankClass == ZC_TANK) return;
+	if (tankClass != ZC_SMOKER && tankClass != ZC_BOOMER) return;
+
+	int partners[MAXPLAYERS + 1], nPartners = 0, hunters = 0, sameClass = 0;
+	for (int i = 1; i <= MaxClients; i++)
+	{
+		if (!IsClientInGame(i) || GetClientTeam(i) != 3 || !IsPlayerAlive(i)) continue;
+		int zc = ZClass(i);
+		if (zc == ZC_HUNTER)
+		{
+			hunters++;
+			if (i != tank && IsHumanGhost(i)) partners[nPartners++] = i;
+		}
+		else if (zc == tankClass && i != tank) sameClass++;	// other players of his class
+	}
+
+	char tankName[MAX_NAME_LENGTH], oldClass[16];
+	GetClientName(tank, tankName, sizeof(tankName));
+	ClassName(tankClass, oldClass, sizeof(oldClass));
+
+	if (nPartners > 0)
+	{
+		int partner = partners[GetRandomInt(0, nPartners - 1)];
+		char partnerName[MAX_NAME_LENGTH];
+		GetClientName(partner, partnerName, sizeof(partnerName));
+		SetGhostClass(tank, tankClass, ZC_HUNTER);
+		SetGhostClass(partner, ZC_HUNTER, tankClass);
+		LogMessage("[tank_control] hunter first: %L (was %s) <-> %L (was Hunter)", tank, oldClass, partner);
+		PrintToChat(tank, "[Tank] You will be the tank this map, so you start as Hunter; you swapped classes with %s (now %s).", partnerName, oldClass);
+		PrintToChat(partner, "[Tank] %s will be the tank this map and starts as Hunter; you swapped classes with them (you are now %s).", tankName, oldClass);
+		return;
+	}
+
+	// no teammate ghost holds a hunter: change him alone only if the hunter limit allows it and his class
+	// is not the team's only smoker / boomer under a limit of 1
+	int hunterLimit = (g_hCvarHunterLimit != null) ? g_hCvarHunterLimit.IntValue : 0;
+	ConVar classLimitCvar = (tankClass == ZC_SMOKER) ? g_hCvarSmokerLimit : g_hCvarBoomerLimit;
+	int classLimit = (classLimitCvar != null) ? classLimitCvar.IntValue : 0;
+	if (hunters >= hunterLimit)
+	{
+		LogMessage("[tank_control] hunter first skipped: %L is %s, no hunter ghost to swap with and the team has %d of z_hunter_limit %d hunters", tank, oldClass, hunters, hunterLimit);
+		return;
+	}
+	if (classLimit == 1 && sameClass == 0)
+	{
+		LogMessage("[tank_control] hunter first skipped: %L is the team's only %s (limit 1) and no hunter ghost to swap with", tank, oldClass);
+		return;
+	}
+	SetGhostClass(tank, tankClass, ZC_HUNTER);
+	LogMessage("[tank_control] hunter first: %L (was %s) -> Hunter, no hunter ghost to swap with (%d of z_hunter_limit %d hunters)", tank, oldClass, hunters, hunterLimit);
+	PrintToChat(tank, "[Tank] You will be the tank this map, so you start as Hunter (was %s).", oldClass);
 }
 
 bool:IsPluginDisabled()
