@@ -21,7 +21,7 @@
  *    is exactly a whole number on one tick in every 512 (4 seconds). Any hit on that tick
  *    whose damage matches kills.
  *
- * Reproduced on a stock server with a bot rig (temp 2.5: stays up, 1.998:
+ * Reproduced on a stock server with deploy/tools/lastliferig (temp 2.5: stays up, 1.998:
  * incap, 2.002: stays up, 2.0: dies; same with 0 revives used).
  *
  * Fix: before the game looks at a hit on a standing, going-to-die survivor, if his temp
