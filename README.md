@@ -21,6 +21,7 @@ Each plugin ships as source (`addons/sourcemod/scripting`) and compiled
 | `l4d_hunter_phantom_fix` | 0.2 | | Stops a hunter killed mid-pounce from carrying on shredding (sound and claw blood at the pin spot) on clients after it dies. See below. |
 | `l4d_wallkick_reset` | 1.1 | Linux (checks the CLunge layout and refuses to load on any other) | A hunter that pinned someone, or scratched and bumped a survivor, can wall kick again after landing. Stock L4D1 keeps its "touched a player" flag until the next pounce from the ground, so a plain jump at a wall cannot be kicked off. See below. |
 | `l4d_smg_common_bonus` | 1.0 | sdkhooks | Uzi bullets do extra damage to common infected only (`l4d_smg_common_bonus`, default 1.25). Special infected, tanks and witches take stock Uzi damage. A buff for clearing horde that leaves the SI fights alone. See below. |
+| `l4d_last_life_fix` | 1.0 | sdkhooks | A revived survivor who still has incaps left is incapped, not killed outright, when a hit lands on the one tick where his temp health is a whole number. Fixes a hole in the game's own damage code. See below. |
 | `l4d_baseline_keep` | 1.1 | Linux, engine.so md5 `9ee78e2fd274e0639e3aae704f2d7b1f` (checks every byte and refuses to patch on any other); gamedata `l4d_baseline_keep.txt` | Fixes a stock engine bug that can leave special infected invisible to one player after that player lags for about a second. See below. |
 | `l4d_tank_rules` | 1.3.1 | gamedata `l4d_tank_rules.txt` (Linux + Windows) | While a tank is alive: survivor distance points are frozen, and primary weapon swaps can be locked, limited to one per tank, or made to cost a full reload. See below. |
 | `l4d_ledge_fix` | 1.3 | left4dhooks, gamedata `l4d_ledge_fix.txt` | Blocks ledge hangs over drops that could not hurt (a survivor hanging off a rock a few units above the floor). See below. |
@@ -986,6 +987,53 @@ and 2 only) 4/4, 1.1 0/12. Live over the internet: stock 5/5, patched 0/16. Reco
 reconnects, map changes and SourceTV all behave as before.
 
 Cvars: `l4d_baseline_keep_enable` (1). Command: `sm_baselinekeep_status` (rcon flag).
+
+## Dying with incaps left
+
+A survivor who has been revived once (limit 2), standing at 1 health and 2 temp health, is hit by a
+common for 2 and dies. No incap, and no "is dying instead of incapping" line in the server log. It
+looks random, and it is rare, but it is a real hole in the game's damage code.
+
+- `CTerrorPlayer::AllowDamage` decides whether a hit is survivable from whole numbers:
+  `health + int(temp) - damage > 0`. With 1 health, 2.0 temp and a hit for 2 it answers yes and
+  skips the incap decision.
+- `CTerrorPlayer::OnTakeDamage_Alive` then applies the hit and takes one extra point of temp health
+  from a standing survivor marked `m_isGoingToDie` (every revive sets it). He stays up only if
+  `temp - (damage - health) - 1 > 0`. Here that is `2.0 - 1 - 1 = 0`, so nothing keeps him at 1
+  health and he dies.
+- The two disagree only when temp health equals `damage - health + 1` exactly. Just above it he
+  stays up with a sliver of temp health; just below it he is incapped as normal.
+
+Temp health is `m_healthBuffer` less `pain_pills_decay_rate` per second since `m_healthBufferTime`.
+At 128 tick with a decay rate of 0.25 that is exactly 1/512 per tick, so temp health is exactly a
+whole number on one tick in every 512 (once every 4 seconds), and any hit on that tick whose damage
+matches kills. At other tick rates or decay rates the exact match is much less likely, but the code
+path is the same. The revive count does not matter: it kills with no revives used as long as
+`m_isGoingToDie` is set.
+
+`l4d_last_life_fix` hooks `OnTakeDamage` (pre) on survivors. For a standing survivor with
+`m_isGoingToDie` set, if his temp health is within `l4d_last_life_fix_window` of a whole number it
+takes `l4d_last_life_fix_nudge` off `m_healthBuffer` before the game reads it. `AllowDamage` then
+sees him out of health and runs its normal decision: incap if he has incaps left, death if he has
+none. That is what the hit does one tick later anyway.
+
+Tested with bots on a stock L4D1 Linux server, bare and beside the full Rotoblin plugin set,
+damage through `point_hurt`:
+
+| Health + temp, hit | Stock | With the plugin |
+|---|---|---|
+| 1 + 2.5, hit for 2 | stays up | stays up |
+| 1 + 1.998, hit for 2 | incap | incap |
+| 1 + 2.002, hit for 2 | stays up | stays up |
+| 1 + 2.0, hit for 2 | dies | incap |
+| 1 + 2.0, hit for 2, no revives used | dies | incap |
+| 1 + 5.0, hit for 5 | dies | incap |
+| 3 + 3.0, hit for 5 | dies | incap |
+| 1 + 2.0, hit for 2, out of incaps | dies | dies |
+
+Cvars: `l4d_last_life_fix` (1; 0 is stock), `l4d_last_life_fix_log` (1 writes every nudge to
+`logs/last_life_fix.log`; it logs any hit on that tick, whether or not its damage would have
+matched), `l4d_last_life_fix_window` (0.0005), `l4d_last_life_fix_nudge` (0.002).
 
 ## Tools
 
