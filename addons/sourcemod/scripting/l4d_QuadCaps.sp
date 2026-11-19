@@ -52,6 +52,13 @@ new Handle:hCvarNoQuadAfterHunter;
 // riverside8 (2026-10-28, live report of two boomers): riverside6 fired on ANY smoker death, so a smoker dying while the
 // last wave's boomer was still up switched his player to a second boomer. Dirty now needs no other living boomer, both
 // at the smoker's death and again when his ghost is switched.
+// riverside9 (owner ruling 2026-11-18, report: DA map 3 both teams opened 3 hunters + boomer): the first attack of
+// every half is the standard 2 hunters + 1 smoker + 1 boomer. Upstream only copied half one's stock deal into half
+// two, so a stock 3+1 or 4-hunter opener was mirrored, never fixed. With sm_standard_first_attack 1 the starting line
+// is fixed (one smoker and one boomer if their limits allow, hunters for the rest of z_max_player_zombies) and is
+// enforced in both halves while the infected are still in ready-up / before the survivors leave the saferoom.
+// Ghosts are only switched away from a class the team has too many of, so no switch can open a new gap.
+new Handle:hCvarStandardFirstAttack;
 new Handle:HCVAR_Z_VS_SMOKER_LIMIT;
 new Handle:HCVAR_Z_VS_BOOMER_LIMIT;
 new Handle:HCVAR_Z_HUNTER_LIMIT;
@@ -70,7 +77,7 @@ public Plugin:myinfo =
 	name = "L4D Quad Caps Control",
 	author = "Harry Potter",
 	description = "As the name says, you dumb fuck",
-	version = "1.5-riverside8",
+	version = "1.5-riverside9",
 	url = "http://steamcommunity.com/profiles/76561198026784913"
 }
 
@@ -143,6 +150,7 @@ public OnPluginStart()
 	HCVAR_Z_HUNTER_LIMIT = FindConVar("z_hunter_limit");
 	hCvar3HT1SProbability = CreateConVar("sm_3ht1s_percent_chance", "90", "X% chance of 3+1 and 100-X% remaining chance of 4ht after Boomer dies", FCVAR_NOTIFY, true, 0.0,true, 100.0);
 	hCvarDirtyAfterSmoker = CreateConVar("sm_dirty_after_smoker", "1", "1 = smoker dies last gives hunters + exactly one boomer (the smoker's player)", FCVAR_NOTIFY, true, 0.0, true, 1.0);
+	hCvarStandardFirstAttack = CreateConVar("sm_standard_first_attack", "1", "1 = every half's first attack is 2 hunters + 1 smoker + 1 boomer; 0 = upstream (half two copies half one's stock deal)", FCVAR_NOTIFY, true, 0.0, true, 1.0);
 	hCvarNoQuadAfterHunter = CreateConVar("sm_noquad_after_hunter", "1", "1 = hunter dies last never gives a quad (the last ghost of the wave becomes the boomer if nobody else is one)", FCVAR_NOTIFY, true, 0.0, true, 1.0);
 	
 	CVAR_Z_VS_SMOKER_LIMIT_ORIGINAL = GetConVarInt(HCVAR_Z_VS_SMOKER_LIMIT);
@@ -247,6 +255,17 @@ public void Event_RoundStart(Event event, const char[] name, bool dontBroadcast)
 	g_bRoundLive = true;
 	g_bHalfLive = false;
 	if (g_bLimitsOverridden) RestoreLimits();
+	if (GetConVarBool(hCvarStandardFirstAttack)) SetStandardLine();
+}
+
+// riverside9: the standard opener, from the config limits (not the live ones, which this plugin may have overridden)
+void SetStandardLine()
+{
+	new maxSI = GetConVarInt(FindConVar("z_max_player_zombies"));
+	Smoker_Starting_Line = (CVAR_Z_VS_SMOKER_LIMIT_ORIGINAL > 0 && maxSI >= 1) ? 1 : 0;
+	Boomer_Starting_Line = (CVAR_Z_VS_BOOMER_LIMIT_ORIGINAL > 0 && maxSI - Smoker_Starting_Line >= 1) ? 1 : 0;
+	Hunter_Starting_Line = maxSI - Smoker_Starting_Line - Boomer_Starting_Line;
+	if (Hunter_Starting_Line < 0) Hunter_Starting_Line = 0;
 }
 
 public void Event_PlayerSpawn(Event event, const char[] name, bool dontBroadcast)
@@ -365,7 +384,7 @@ public L4D_OnEnterGhostState(client)
 	if(g_bNoQuadPending)
 		CreateTimer(OnEnterGhostCheckDelay, Timer_NoQuadCheck, GetClientUserId(client));
 
-	if(!InSecondHalfOfRound())
+	if(!InSecondHalfOfRound() && !GetConVarBool(hCvarStandardFirstAttack))
 	{
 		Sub_DebugPrint("Round 1");
 		return;
@@ -515,24 +534,24 @@ public void Sub_DetermineClass(int Client)
 		}
 
 		zombieclass = GetEntProp(Client, Prop_Send, "m_zombieClass");
+		// riverside9: only a ghost whose class the team has too many of is switched (upstream also switched the
+		// one boomer to fill a missing smoker, which then left the boomer missing if he was checked last)
+		new bool:bSurplus = (zombieclass == ZC_SMOKER && Smoker_Now_Line > Smoker_Starting_Line)
+			|| (zombieclass == ZC_BOOMER && Boomer_Now_Line > Boomer_Starting_Line)
+			|| (zombieclass == ZC_HUNTER && Hunter_Now_Line > Hunter_Starting_Line);
+		if(!bSurplus) return;
 		if(Smoker_Now_Line<Smoker_Starting_Line)
-		{
-			if(zombieclass != ZC_SMOKER)
-				NeedChange = ZC_SMOKER;
-		}
+			NeedChange = ZC_SMOKER;
 		else if (Boomer_Now_Line<Boomer_Starting_Line)
-		{
-			if(zombieclass != ZC_BOOMER)
-				NeedChange = ZC_BOOMER;
-		}
+			NeedChange = ZC_BOOMER;
 		else if (Hunter_Now_Line<Hunter_Starting_Line)
-		{
-			if(zombieclass != ZC_HUNTER)
-				NeedChange = ZC_HUNTER;
-		}
+			NeedChange = ZC_HUNTER;
 		
 		if(NeedChange > 0)
 		{
+			// keep stock rotation fair, as Timer_DirtyBoomer does: this life counts as the class it became
+			SetEntProp(Client, Prop_Send, "m_classSpawnCount", GetEntProp(Client, Prop_Send, "m_classSpawnCount", 4, zombieclass) - 1, 4, zombieclass);
+			SetEntProp(Client, Prop_Send, "m_classSpawnCount", GetEntProp(Client, Prop_Send, "m_classSpawnCount", 4, NeedChange) + 1, 4, NeedChange);
 			ChangeGhostClass(Client, NeedChange);
 			Sub_DebugPrint("H: %d, S:%d, B:%d, %N has changed to %s",Hunter_Now_Line,Smoker_Now_Line,Boomer_Now_Line,Client,TEAM_CLASS(GetEntProp(Client, Prop_Send, "m_zombieClass")));
 		}
@@ -555,6 +574,7 @@ void ChangeGhostClass(int Client, int NewClass)
 
 public Action:KeepSIStarting(Handle:timer,any:client)
 {
+	if(GetConVarBool(hCvarStandardFirstAttack)) return;	// riverside9: the line is fixed, not copied
 	if(!InSecondHalfOfRound())
 	{
 		Sub_DebugPrint("Keep it");
