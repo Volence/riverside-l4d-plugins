@@ -35,13 +35,21 @@ static char g_sFirstPickSteamId[32];
 static bool g_bHalfLive, g_bFirstSpawned;
 ConVar g_hCvarHunterFirst, g_hCvarHunterLimit, g_hCvarSmokerLimit, g_hCvarBoomerLimit;
 
+// riverside3: pick the half's first tank during ready-up (owner, 2026-11-21, Discord thread "Getting rid of
+// the ability to pass tanks": the hunter swap at go-live turned a boomer into a hunter as survivors left).
+// Before riverside3 the half-2 swap always waited for go-live: no ghost entry reached the plan between the
+// halves (Dallas 11-21: no PUG_PlannedTank call in any half-2 ready-up, swap logged the same second as go-live).
+static Handle g_hPreRoundTimer;
+static int g_iPreRoundSig;		// infected humans seen at the last pre-round ask (userid hash)
+static char g_sLastSkip[192];	// hunter-first skip reason already logged this half
+
 #define HUNTER_FIRST_DELAY	0.3	// after QuadCaps' 0.1 s ghost class checks (COLD_DOWN, KeepSIStarting)
 
 public Plugin:myinfo = {
 	name = "L4D Tank Control",
 	author = "Jahze, vintik, raziEiL [disawar1], Harry Potter",
-	version = "2.3-riverside2",
-	description = "Forces each player to play the tank at least once before Map change. Riverside: PUG matches pick by SR rank slot (pug-match); the planned tank is given back if he returns; the map's first tank starts the half as a hunter."
+	version = "2.3-riverside3",
+	description = "Forces each player to play the tank at least once before Map change. Riverside: PUG matches pick by SR rank slot (pug-match); the planned tank is given back if he returns; the map's first tank starts the half as a hunter, picked and swapped during ready-up."
 };
 
 static bool:g_bCvartankcontroldisable,Handle:hCvarFlags;
@@ -102,6 +110,7 @@ public OnPluginStart()
 	HookEvent("player_team", TC_ev_OnTeamChange);
 	HookEvent("player_left_start_area", TC_ev_LeftStartAreaEvent, EventHookMode_PostNoCopy);
 	HookEvent("round_start", TC_ev_RoundStart, EventHookMode_PostNoCopy);
+	HookEvent("round_end", TC_ev_RoundEnd, EventHookMode_PostNoCopy);
 	HookEvent("player_spawn", TC_ev_PlayerSpawn);
 	
 	RegConsoleCmd("sm_tank", Command_FindNexTank);
@@ -303,6 +312,81 @@ public Action:TC_ev_RoundStart(Handle:event, const String:name[], bool:dontBroad
 	g_sFirstPickSteamId[0] = '\0';
 	g_bHalfLive = false;
 	g_bFirstSpawned = false;
+	StartPreRound();
+}
+
+// riverside3: the next half's ghosts can appear before its round_start; stale flags from the half that just
+// ended must not block them (L4D_OnEnterGhostState returns on g_bFirstSpawned).
+public void TC_ev_RoundEnd(Event event, const char[] name, bool dontBroadcast)
+{
+	g_bHalfLive = false;
+	g_bFirstSpawned = false;
+}
+
+public void OnMapEnd()
+{
+	g_hPreRoundTimer = null;	// TIMER_FLAG_NO_MAPCHANGE already killed it
+}
+
+static void StartPreRound()
+{
+	g_iPreRoundSig = 0;
+	g_sLastSkip[0] = '\0';
+	delete g_hPreRoundTimer;
+	g_hPreRoundTimer = CreateTimer(1.0, Timer_PreRound, _, TIMER_REPEAT | TIMER_FLAG_NO_MAPCHANGE);
+}
+
+public Action Timer_PreRound(Handle timer)
+{
+	if (g_bHalfLive || g_bFirstSpawned || IsSecondTank)
+	{
+		g_hPreRoundTimer = null;
+		return Plugin_Stop;
+	}
+	if (!IsPluginDisabled()) PreRoundPick();
+	return Plugin_Continue;
+}
+
+/**
+ * riverside3: during ready-up (or before the survivors leave without l4dready) choose the half's first tank
+ * as soon as the infected side can answer, announce it, and give him his hunter then, so nobody's class
+ * changes at go-live. The plan (pug-match) is asked again only when the infected humans change, since every
+ * PUG_PlannedTank call logs a line. With no answer from the plan, the random "everyone once" pick waits for a
+ * full infected team so it cannot pick among the first players to load. Go-live keeps its own pick for
+ * anything left open (Native_ChoseTankPrintWhoBecome).
+ */
+static void PreRoundPick()
+{
+	if (queuedTank > 0 && IsInfectedHuman(queuedTank))
+	{
+		HunterFirst(queuedTank);	// no-op once he is a hunter; waits for his and a partner's ghost
+		return;
+	}
+
+	int sig = 0, humans = 0;
+	for (int i = 1; i <= MaxClients; i++)
+	{
+		if (!IsInfectedHuman(i)) continue;
+		humans++;
+		sig = sig * 31 + GetClientUserId(i);
+	}
+	if (humans == 0 || sig == g_iPreRoundSig) return;
+	g_iPreRoundSig = sig;
+
+	int was = queuedTank;
+	if (!ChoosePlannedTank())
+	{
+		if (humans < g_hCvarInfLimit.IntValue) return;	// still loading: the plan or a full team will answer
+		ChooseTank();
+	}
+	if (queuedTank > 0 && queuedTank != was)
+	{
+		LogMessage("[tank_control] pre-round pick (%s): %L", g_iQueuedSource == QT_PLAN ? "pug-match tank order" : "random", queuedTank);
+		char name[128];
+		GetClientName(queuedTank, name, sizeof(name));
+		CPrintToChatAll("%t", "player will be the tank", name);
+		QueueHunterFirst(queuedTank);
+	}
 }
 
 public TC_ev_OnTeamChange(Handle:event, String:name[], bool:dontBroadcast)
@@ -883,17 +967,27 @@ static void HunterFirst(int tank)
 	int classLimit = (classLimitCvar != null) ? classLimitCvar.IntValue : 0;
 	if (hunters >= hunterLimit)
 	{
-		LogMessage("[tank_control] hunter first skipped: %L is %s, no hunter ghost to swap with and the team has %d of z_hunter_limit %d hunters", tank, oldClass, hunters, hunterLimit);
+		LogSkipOnce("[tank_control] hunter first skipped: %L is %s, no hunter ghost to swap with and the team has %d of z_hunter_limit %d hunters", tank, oldClass, hunters, hunterLimit);
 		return;
 	}
 	if (classLimit == 1 && sameClass == 0)
 	{
-		LogMessage("[tank_control] hunter first skipped: %L is the team's only %s (limit 1) and no hunter ghost to swap with", tank, oldClass);
+		LogSkipOnce("[tank_control] hunter first skipped: %L is the team's only %s (limit 1) and no hunter ghost to swap with", tank, oldClass);
 		return;
 	}
 	SetGhostClass(tank, tankClass, ZC_HUNTER);
 	LogMessage("[tank_control] hunter first: %L (was %s) -> Hunter, no hunter ghost to swap with (%d of z_hunter_limit %d hunters)", tank, oldClass, hunters, hunterLimit);
 	PrintToChat(tank, "[Tank] You will be the tank this map, so you start as Hunter (was %s).", oldClass);
+}
+
+/** riverside3: the pre-round poll retries every second; log each skip reason once per half. */
+static void LogSkipOnce(const char[] fmt, any ...)
+{
+	char msg[192];
+	VFormat(msg, sizeof(msg), fmt, 2);
+	if (StrEqual(msg, g_sLastSkip)) return;
+	strcopy(g_sLastSkip, sizeof(g_sLastSkip), msg);
+	LogMessage("%s", msg);
 }
 
 bool:IsPluginDisabled()
