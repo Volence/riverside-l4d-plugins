@@ -21,7 +21,7 @@ Each plugin ships as source (`addons/sourcemod/scripting`) and compiled
 | `l4d_hunter_phantom_fix` | 0.2 | | Stops a hunter killed mid-pounce from carrying on shredding (sound and claw blood at the pin spot) on clients after it dies. See below. |
 | `l4d_wallkick_reset` | 1.1 | Linux (checks the CLunge layout and refuses to load on any other) | A hunter that pinned someone, or scratched and bumped a survivor, can wall kick again after landing. Stock L4D1 keeps its "touched a player" flag until the next pounce from the ground, so a plain jump at a wall cannot be kicked off. See below. |
 | `l4d_smg_common_bonus` | 1.0 | sdkhooks | Uzi bullets do extra damage to common infected only (`l4d_smg_common_bonus`, default 1.25). Special infected, tanks and witches take stock Uzi damage. A buff for clearing horde that leaves the SI fights alone. See below. |
-| `l4d_last_life_fix` | 1.0 | sdkhooks | A revived survivor who still has incaps left is incapped, not killed outright, when a hit lands on the one tick where his temp health is a whole number. Fixes a hole in the game's own damage code. See below. |
+| `l4d_last_life_fix` | 1.0.1 | sdkhooks | A survivor marked to die (revived, or living on 1 health plus temp health) who still has incaps left is incapped, not killed outright, when a hit lands on the one tick where his temp health is a whole number. Fixes a hole in the game's own damage code. See below. |
 | `l4d_baseline_keep` | 1.1 | Linux, engine.so md5 `9ee78e2fd274e0639e3aae704f2d7b1f` (checks every byte and refuses to patch on any other); gamedata `l4d_baseline_keep.txt` | Fixes a stock engine bug that can leave special infected invisible to one player after that player lags for about a second. See below. |
 | `l4d_tank_rules` | 1.3.1 | gamedata `l4d_tank_rules.txt` (Linux + Windows) | While a tank is alive: survivor distance points are frozen, and primary weapon swaps can be locked, limited to one per tank, or made to cost a full reload. See below. |
 | `l4d_ledge_fix` | 1.3 | left4dhooks, gamedata `l4d_ledge_fix.txt` | Blocks ledge hangs over drops that could not hurt (a survivor hanging off a rock a few units above the floor). See below. |
@@ -998,7 +998,7 @@ looks random, and it is rare, but it is a real hole in the game's damage code.
   `health + int(temp) - damage > 0`. With 1 health, 2.0 temp and a hit for 2 it answers yes and
   skips the incap decision.
 - `CTerrorPlayer::OnTakeDamage_Alive` then applies the hit and takes one extra point of temp health
-  from a standing survivor marked `m_isGoingToDie` (every revive sets it). He stays up only if
+  from a standing survivor marked `m_isGoingToDie` (see below for what sets it). He stays up only if
   `temp - (damage - health) - 1 > 0`. Here that is `2.0 - 1 - 1 = 0`, so nothing keeps him at 1
   health and he dies.
 - The two disagree only when temp health equals `damage - health + 1` exactly. Just above it he
@@ -1010,6 +1010,14 @@ whole number on one tick in every 512 (once every 4 seconds), and any hit on tha
 matches kills. At other tick rates or decay rates the exact match is much less likely, but the code
 path is the same. The revive count does not matter: it kills with no revives used as long as
 `m_isGoingToDie` is set.
+
+`m_isGoingToDie` is not only a revive mark. Every revive sets it, but so does `OnTakeDamage_Alive`
+itself: when a hit takes a survivor's permanent health below 1 and temp health is left over, the game
+puts him back at 1 health, takes the overflow from temp health and marks him. So a survivor with 0
+incaps used who has burned through his permanent health and is living on 1 health plus temp health is
+marked too, and from then on the hole above can kill him on a hit instead of incapping him. Thanks to
+Harry for finding this (2026-11-20). The plugin keys on the mark, not the revive count, so it covers
+this case as it is.
 
 `l4d_last_life_fix` hooks `OnTakeDamage` (pre) on survivors. For a standing survivor with
 `m_isGoingToDie` set, if his temp health is within `l4d_last_life_fix_window` of a whole number it

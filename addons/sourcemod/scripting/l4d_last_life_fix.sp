@@ -1,6 +1,9 @@
 /*
- * l4d_last_life_fix: a revived survivor with incaps left is incapped, not killed outright,
- * when a hit lands on the one tick where his temporary health is a whole number.
+ * l4d_last_life_fix: a survivor marked to die (m_isGoingToDie) with incaps left is incapped,
+ * not killed outright, when a hit lands on the one tick where his temporary health is a whole
+ * number. The mark is not only from revives: any hit that takes his permanent health below 1
+ * while temp health keeps him up at 1 sets it too, so this also covers survivors with 0 incaps
+ * used (found by Harry, 2026-11-20).
  *
  * Found on match 1230 (2026-11-18, Dead Air 4): VI, revived once (limit 2), standing at
  * 1 health + 2 temp, was hit by a common for 2 and died. No incap, and no
@@ -11,10 +14,11 @@
  *    health + int(temp) - damage > 0. With 1 health, 2.0 temp and a hit for 2 it says yes
  *    and skips the incap decision.
  *  - CTerrorPlayer::OnTakeDamage_Alive then applies the hit, and takes ONE EXTRA point of
- *    temp health from a survivor marked m_isGoingToDie (set by every revive) who is still
- *    standing. He stays up only if temp - (damage - health) - 1 > 0. With the numbers
- *    above that is 2.0 - 1 - 1 = 0, not above 0, so nothing rescues him and he dies with
- *    health below 1.
+ *    temp health from a survivor marked m_isGoingToDie who is still standing. Every revive
+ *    sets the mark, and so does OnTakeDamage_Alive itself when a hit leaves him under 1 health
+ *    with temp health left over (he is put back at 1 health), revived or not. He stays up
+ *    only if temp - (damage - health) - 1 > 0. With the numbers above that is
+ *    2.0 - 1 - 1 = 0, not above 0, so nothing rescues him and he dies with health below 1.
  *  - The two only disagree when temp == damage - health + 1 exactly. Just above, he stays
  *    up with a sliver of temp health; just below, AllowDamage sends him to the incap code.
  *  - At 128 tick with pain_pills_decay_rate 0.25, temp health decays 1/512 per tick, so it
@@ -43,7 +47,7 @@
 #include <sdktools>
 #include <sdkhooks>
 
-#define PLUGIN_VERSION	"1.0"
+#define PLUGIN_VERSION	"1.0.1"
 #define TEAM_SURVIVOR	2
 
 ConVar g_cvEnable, g_cvLog, g_cvWindow, g_cvNudge, g_cvDecay;
@@ -53,7 +57,7 @@ public Plugin myinfo =
 {
 	name = "l4d_last_life_fix",
 	author = "Malevolence",
-	description = "A revived survivor with incaps left goes down, not dies, when a hit takes exactly all his temp health",
+	description = "A survivor marked to die (revived, or on 1 health plus temp) with incaps left goes down, not dies, when a hit takes exactly all his temp health",
 	version = PLUGIN_VERSION,
 	url = ""
 };
