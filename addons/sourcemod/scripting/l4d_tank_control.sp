@@ -45,11 +45,23 @@ static char g_sLastSkip[192];	// hunter-first skip reason already logged this ha
 
 #define HUNTER_FIRST_DELAY	0.3	// after QuadCaps' 0.1 s ghost class checks (COLD_DOWN, KeepSIStarting)
 
+// riverside4: who really took the tank. Up to riverside3 the pick (queuedTank) was written into the "has been
+// tank" lists when the bot tank was offered, never checking who took it. Valve's PlayerZombieAbortControl lets
+// the player whose USERID equals the lottery winner's CLIENT INDEX take the offered bot with E or z_abort
+// (l4d_tank_pass_fix 0.5 guards it): DT2 final 2026-11-22, Riverside #5, fran was picked, fauxf6r took the
+// tank, fran was recorded, so fauxf6r was picked again on map 3 and map 4 and adam never tanked. The lists now
+// take the first human who spawns as the tank after the offer; nobody is written when the AI keeps it.
+static bool g_bAwaitTaker;				// a fresh tank was offered and no human has taken it yet
+static char g_sAwaitPick[32];			// Steam2 id of the pick at the offer ("" = no pick: free for all)
+static char g_sAwaitPickName[MAX_NAME_LENGTH];
+static int g_iAwaitBotUid;				// userid of the offered tank bot (0 = unknown)
+static Handle g_hFwdRefill;				// TankControl_OnRageRefilled(int tank): the HUDs count it as a new control
+
 public Plugin:myinfo = {
 	name = "L4D Tank Control",
 	author = "Jahze, vintik, raziEiL [disawar1], Harry Potter",
-	version = "2.3-riverside3",
-	description = "Forces each player to play the tank at least once before Map change. Riverside: PUG matches pick by SR rank slot (pug-match); the planned tank is given back if he returns; the map's first tank starts the half as a hunter, picked and swapped during ready-up."
+	version = "2.3-riverside4",
+	description = "Forces each player to play the tank at least once before Map change. Riverside: PUG matches pick by SR rank slot (pug-match); the planned tank is given back if he returns; the map's first tank starts the half as a hunter, picked and swapped during ready-up; the player who really took the tank is the one recorded."
 };
 
 static bool:g_bCvartankcontroldisable,Handle:hCvarFlags;
@@ -68,6 +80,7 @@ public APLRes AskPluginLoad2(Handle myself, bool late, char[] error, int err_max
 	MarkNativeAsOptional("PUG_PlannedTank");
 	CreateNative("ChoseTankPrintWhoBecome", Native_ChoseTankPrintWhoBecome);
 	CreateNative("WhoIsTank", Native_WhoIsTank);
+	RegPluginLibrary("l4d_tank_control");
 	return APLRes_Success;
 }
 
@@ -112,6 +125,8 @@ public OnPluginStart()
 	HookEvent("round_start", TC_ev_RoundStart, EventHookMode_PostNoCopy);
 	HookEvent("round_end", TC_ev_RoundEnd, EventHookMode_PostNoCopy);
 	HookEvent("player_spawn", TC_ev_PlayerSpawn);
+	HookEvent("tank_killed", TC_ev_TankKilled, EventHookMode_Post);
+	g_hFwdRefill = CreateGlobalForward("TankControl_OnRageRefilled", ET_Ignore, Param_Cell);
 	
 	RegConsoleCmd("sm_tank", Command_FindNexTank);
 	RegConsoleCmd("sm_t", Command_FindNexTank);
@@ -289,6 +304,7 @@ public void TC_ev_PlayerSpawn(Event event, const char[] name, bool dontBroadcast
 	int client = GetClientOfUserId(event.GetInt("userid"));
 	if (client && IsClientInGame(client) && !IsFakeClient(client) && GetClientTeam(client) == 3 && IsPlayerAlive(client) && IsPlayerTank(client))
 	{
+		if (g_bAwaitTaker) RecordTaker(client);
 		queuedTank = 0;
 		g_iQueuedSource = QT_NONE;
 	}
@@ -304,8 +320,77 @@ public void L4D_OnMaterializeFromGhost(int client)
 	if (g_bHalfLive) g_bFirstSpawned = true;
 }
 
+/** riverside4: the offered tank died before a human took it (the AI kept it): nobody to record. Another
+ * tank dying (an older AI tank while this one is still on offer) leaves the wait alone. */
+public void TC_ev_TankKilled(Event event, const char[] name, bool dontBroadcast)
+{
+	if (!g_bAwaitTaker) return;
+	int uid = event.GetInt("userid");
+	if (g_iAwaitBotUid && uid && uid != g_iAwaitBotUid) return;
+	LogMessage("[tank_control] tank died with the AI: nobody recorded (pick was %s)", g_sAwaitPick[0] ? g_sAwaitPickName : "none");
+	g_bAwaitTaker = false;
+}
+
+/** riverside4: the offered tank bot is still out (alive, a bot, a tank on infected): whoever just spawned as a
+ * tank took a different one (PlayerZombieAbortControl takes the first live non-ghost tank bot, which can be an
+ * older AI tank while this one is drawn). */
+static int OfferedBotStillOut()
+{
+	int bot = g_iAwaitBotUid ? GetClientOfUserId(g_iAwaitBotUid) : 0;
+	if (bot > 0 && IsClientInGame(bot) && IsFakeClient(bot) && GetClientTeam(bot) == 3 && IsPlayerAlive(bot) && IsPlayerTank(bot))
+		return bot;
+	return 0;
+}
+
+/**
+ * riverside4: the first human to spawn as the tank after a fresh tank's offer is the one who tanked. He goes
+ * into the lists the offer used to fill with the pick (hTeamTanks unless already in, hTeamFinalTanks on a
+ * finale, hPreviousMapTeamTanks for the same-map restart pruning in OnMapStart).
+ */
+static void RecordTaker(int client)
+{
+	// The offered bot is still out: this player took another (older AI) tank. He is recorded as having tanked,
+	// but the director's pass count belongs to the offered tank (one shared counter: this offer reset it to 0
+	// and its handoff adds 1), so no fix-up, and the wait stays on for the offered tank's real taker.
+	int offered = OfferedBotStillOut();
+	bool other = offered > 0;
+	if (!other) g_bAwaitTaker = false;
+	char sid[32];
+	if (!GetClientAuthId(client, AuthId_Steam2, sid, sizeof(sid)))
+	{
+		LogMessage("[tank_control] tank taken by %L, no auth id: not recorded", client);
+		return;
+	}
+	if (other)
+		LogMessage("[tank_control] %L took another tank while the offered one (#%d) is still out: recorded, pass count left at %d, still waiting for the offered tank's taker", client, offered, L4D2Direct_GetTankPassedCount());
+	else if (g_sAwaitPick[0] == '\0')
+		LogMessage("[tank_control] tank taken by %L (no pick)", client);
+	else if (StrEqual(sid, g_sAwaitPick))
+		LogMessage("[tank_control] tank taken by %L (the pick)", client);
+	else
+		LogMessage("[tank_control] taker differs from pick: pick \"%s\" <%s>, taker %L", g_sAwaitPickName, g_sAwaitPick, client);
+
+	if (!HasBeenTank(sid) && FindStringInArray(hTeamTanks, sid) == -1)
+		PushArrayString(hTeamTanks, sid);
+	if (IsFinal && FindStringInArray(hTeamFinalTanks, sid) == -1)
+		PushArrayString(hTeamFinalTanks, sid);
+	if (FindStringInArray(hPreviousMapTeamTanks, sid) == -1)
+		PushArrayString(hPreviousMapTeamTanks, sid);
+
+	// The steal path (PlayerZombieAbortControl) skips the director's m_iTankPassedCount++ (CreateTanks adds it
+	// on the lottery handoff). Left at 0, the first frustration refills to 1 ("passed count now 1"), the second
+	// is still offered (UpdateZombieFrustration offers while the count is <= 1) and refilled to 2, and only the
+	// third goes to the AI: three controls. A fresh tank's first human holder has had exactly one handoff.
+	if (!other && L4D2Direct_GetTankPassedCount() == 0)
+	{
+		L4D2Direct_SetTankPassedCount(1);
+		LogMessage("[tank_control] pass count was 0 at the take by %L (not the lottery handoff): set to 1", client);
+	}
+}
+
 public Action:TC_ev_RoundStart(Handle:event, const String:name[], bool:dontBroadcast)
 {
+	g_bAwaitTaker = false;
 	queuedTank = 0;
 	g_iQueuedSource = QT_NONE;
 	IsSecondTank = false;
@@ -467,6 +552,9 @@ public Action L4D_OnTryOfferingTankBot(int tank_index, bool &enterStasis)
 		SetTankFrustration(tank_index, 100);
 		L4D2Direct_SetTankPassedCount(L4D2Direct_GetTankPassedCount() + 1);
 		LogMessage("[tank_control] no pass: rage refilled for %L (passed count now %d)", tank_index, L4D2Direct_GetTankPassedCount());
+		Call_StartForward(g_hFwdRefill);
+		Call_PushCell(tank_index);
+		Call_Finish();
 
 		return Plugin_Handled;
 	}
@@ -499,27 +587,17 @@ public void L4D_OnTryOfferingTankBot_Post(int tank_index, bool enterStasis)
 	{
 		CreateTimer(5.0, CheckForAITank, _, TIMER_FLAG_NO_MAPCHANGE);
 	}
+	// riverside4: the lists are written when a human really takes the tank (TC_ev_PlayerSpawn -> RecordTaker)
+	g_bAwaitTaker = true;
+	g_iAwaitBotUid = (tank_index > 0 && tank_index <= MaxClients && IsClientInGame(tank_index) && IsFakeClient(tank_index)) ? GetClientUserId(tank_index) : 0;
+	g_sAwaitPick[0] = '\0';
+	g_sAwaitPickName = "";
 	if (queuedTank>0){
 		ForceTankPlayer(queuedTank);//強制該玩家當tank
-
-		// riverside2 (upstream 2.4): skip the bookkeeping when the auth id cannot be read
-		decl String:sTankSteamId[32];
-		if (GetClientAuthId(queuedTank, AuthId_Steam2, sTankSteamId, sizeof(sTankSteamId)))
-		{
-			if(HasBeenTank(sTankSteamId) == false)
-			{
-				if(FindStringInArray(hTeamTanks, sTankSteamId) == -1)
-					PushArrayString(hTeamTanks, sTankSteamId);
-			}
-			if(IsFinal)
-			{
-				if(FindStringInArray(hTeamFinalTanks, sTankSteamId) == -1)
-					PushArrayString(hTeamFinalTanks, sTankSteamId);
-			}
-				
-			if(FindStringInArray(hPreviousMapTeamTanks, sTankSteamId) == -1)
-				PushArrayString(hPreviousMapTeamTanks, sTankSteamId);
-		}
+		if (GetClientAuthId(queuedTank, AuthId_Steam2, g_sAwaitPick, sizeof(g_sAwaitPick)))
+			GetClientName(queuedTank, g_sAwaitPickName, sizeof(g_sAwaitPickName));
+		else
+			g_sAwaitPick[0] = '\0';
 	}
 	IsSecondTank = true;//已經第一隻Tank了
 	g_sFirstPickSteamId[0] = '\0';

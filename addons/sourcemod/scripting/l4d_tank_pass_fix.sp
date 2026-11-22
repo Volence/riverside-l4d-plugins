@@ -4,8 +4,9 @@
 #include <sourcemod>
 #include <sdktools>
 #include <left4dhooks>
+#include <dhooks>
 
-#define PLUGIN_VERSION "0.4"
+#define PLUGIN_VERSION "0.6"
 
 /**
  * l4d_tank_pass_fix - a passed tank no longer bounces off its new owner.
@@ -60,9 +61,56 @@
  * players is the engine's business; this plugin only cares about the world,
  * props, clips and blockers. The stuck and frozen lines now name what the
  * hull hit (hit=world or the entity's classname) so a stray blocker shows up.
+ *
+ * 0.5: the tank lottery steal guard. Valve's CTerrorPlayer::PlayerZombieAbortControl (an infected player's
+ * USE press, PlayerUse, or the z_abort command) compares the director's m_iTankLotteryWinner, a CLIENT
+ * INDEX (Director::CreateTanks), with the presser's USER ID. If they match it hands the presser the first
+ * live, non-ghost tank BOT (PlayerCollector(infected, alive, bots, tank), ReplaceWithBot + TakeOverBot),
+ * clears the winner and skips the director's m_iTankPassedCount++. Reported: DT2 final 2026-11-22,
+ * Riverside #5, l4d_tank_control picked fran (index 5) and fauxf6r (userid 5) took it; the refill then
+ * read "passed count now 1". The engine's own check (l4d-source PlayerZombieAbortControl.cpp:17) is the
+ * real fix, held with the other Valve bug fixes.
+ *
+ * When a press can take it (round replays at 10 Hz, confirmed on the bot rig, tools/tankfixrig): the offered
+ * tank waits in stasis as a ghost (m_isGhost 1) and the collector skips it, but it stops being a ghost about
+ * 3.0 s after the offer (rig: +3.01 to +3.10 s) while the handoff comes at about +3.11 s and the winner
+ * index stays set the whole draw. In that last ~0.1 s the colliding player's E or z_abort takes it: the
+ * incident (take minus offer 3.01-3.11 s) and the rig (z_abort at +3.07 s, E the frame the ghost flag
+ * dropped, both taken, pass count skipped). Earlier in the draw a press collects nothing. The same press
+ * also works whenever another live non-ghost tank bot is out while a winner index is set: the "stale
+ * winner" (the winner left the infected team before the handoff; CreateTanks releases the tank to the AI
+ * and keeps the index, so the colliding player can take the AI tank at any later time) and an older AI tank
+ * while another lottery draws (the steal takes the old tank, clears the winner, and the offered tank stays
+ * with the AI). All reproduced on the rig.
+ *
+ * The guard drops IN_USE from the usercmd (OnPlayerRunCmd) and blocks z_abort for an infected player only
+ * when the press would be that steal: a live non-ghost tank bot exists and the presser's userid equals the
+ * pending winner (terror_player_manager m_pendingTankPlayerIndex, which CTerrorPlayerResource copies from
+ * m_iTankLotteryWinner every resource think). That networked copy can be up to one think late after the
+ * draw, so from a bot tank's offer (L4D_OnTryOfferingTankBot_Post) until entry + selection time + 1 s,
+ * while it still reads 0, any infected player whose userid is the client index of another infected player
+ * is blocked too. Everyone else's E (GhostWarp's survivor cycling, the stock ghost warp) keeps working.
+ * A press held through the block stays blocked until released, so letting go of the strip cannot turn
+ * into a fresh press. One line per window per client and kind in tank_pass_fix.log ("lottery winner"
+ * inside the offer window, "stale winner" after it). l4d_tank_pass_fix_steal_guard 0 logs the same lines
+ * and blocks nothing.
+ *
+ * 0.6: no "take the tank now" at all (owner, 2026-11-22). A DHooks detour on PlayerZombieAbortControl
+ * (gamedata l4d_tank_pass_fix.txt) supercedes the call whenever the director's m_iTankLotteryWinner equals
+ * the caller's userid, i.e. exactly when Valve would run the takeover branch. That branch is all the call
+ * does in that case (Valve returns from it whether or not a tank was found; the ghost warp and the cull
+ * branch only run when the comparison fails), so superceding it changes nothing else, and the only callers
+ * are PlayerUse (E) and the z_abort command: the director's own handoff (CreateTanks ->
+ * TakeOverZombieBot) never goes through it. E and z_abort input are left alone, so GhostWarp's E and the
+ * stock ghost warp keep working for everyone else. Each superceded call is logged ("takeover blocked",
+ * with the tank it would have taken or "nothing to take"). l4d_tank_pass_fix_no_takeover 0 logs and lets
+ * Valve's code run. If the detour or the offset is not available the 0.5 input guard runs instead.
  */
 
-ConVar g_cvEnabled, g_cvLottery, g_cvUnstick;
+ConVar g_cvEnabled, g_cvLottery, g_cvUnstick, g_cvStealGuard, g_cvLotteryEntry, g_cvNoTakeover;
+bool g_bDetour;				// 0.6: the PlayerZombieAbortControl detour is on (the 0.5 input guard stands down)
+int g_iWinnerOffset = -1;	// Director::m_iTankLotteryWinner
+float g_fLastTakeoverLog[MAXPLAYERS + 1];
 float g_fLastHumanOffer = -1000.0;
 char g_sLog[PLATFORM_MAX_PATH];
 
@@ -75,11 +123,18 @@ float g_fClearSpotAt[MAXPLAYERS + 1];
 float g_vLastPos[MAXPLAYERS + 1][3];
 int g_iStuckTicks[MAXPLAYERS + 1];
 
+// 0.5 steal guard
+float g_fOfferAt = -1000.0, g_fOfferUntil = -1000.0;	// the last bot tank offer and its fallback window
+int g_iOfferSerial;										// one per offer: a blocked client logs once per offer
+int g_iLoggedKey[MAXPLAYERS + 1][2];					// [client][0 = USE, 1 = z_abort]: last logged window
+bool g_bUseHeld[MAXPLAYERS + 1];						// a blocked USE still held down
+bool g_bUseDown[MAXPLAYERS + 1];						// IN_USE was down (and let through) last usercmd
+
 public Plugin myinfo =
 {
 	name = "Tank Pass Fix",
 	author = "Malevolence",
-	description = "Stops a passed tank being taken off its new owner by a duplicate lottery",
+	description = "Stops a passed tank being taken off its new owner by a duplicate lottery, unsticks tanks, and skips Valve's E/z_abort tank takeover",
 	version = PLUGIN_VERSION,
 	url = "https://riversidepug.com"
 };
@@ -88,21 +143,89 @@ public void OnPluginStart()
 {
 	g_cvEnabled = CreateConVar("l4d_tank_pass_fix", "1", "1 = block a duplicate human-tank offer inside one lottery of the last, 0 = log only.", FCVAR_NOTIFY, true, 0.0, true, 1.0);
 	g_cvUnstick = CreateConVar("l4d_tank_pass_fix_unstick", "1", "1 = a passed tank that comes up stuck goes to the old tank's spot or the nearest free one, 0 = log only.", FCVAR_NOTIFY, true, 0.0, true, 1.0);
+	g_cvStealGuard = CreateConVar("l4d_tank_pass_fix_steal_guard", "1", "1 = an infected player whose userid equals the tank lottery winner's client index cannot take a tank bot with E or z_abort (Valve's userid/index mix-up), 0 = log only.", FCVAR_NOTIFY, true, 0.0, true, 1.0);
 	g_cvLottery = FindConVar("director_tank_lottery_selection_time");
+	g_cvLotteryEntry = FindConVar("director_tank_lottery_entry_time");
+	g_cvNoTakeover = CreateConVar("l4d_tank_pass_fix_no_takeover", "1", "1 = Valve's E / z_abort tank takeover (PlayerZombieAbortControl, lottery winner index == userid) is skipped for everyone, 0 = log only.", FCVAR_NOTIFY, true, 0.0, true, 1.0);
+	AddCommandListener(Cmd_ZAbort, "z_abort");
 	BuildPath(Path_SM, g_sLog, sizeof(g_sLog), "logs/tank_pass_fix.log");
+	SetupDetour();
 	HookEvent("round_start", Event_RoundStart, EventHookMode_PostNoCopy);
+}
+
+void SetupDetour()
+{
+	// new GameData throws on a missing file, which would take the whole plugin down: look first
+	char path[PLATFORM_MAX_PATH];
+	BuildPath(Path_SM, path, sizeof(path), "gamedata/l4d_tank_pass_fix.txt");
+	GameData gd = FileExists(path) ? new GameData("l4d_tank_pass_fix") : null;
+	if (gd == null)
+	{
+		LogToFileEx(g_sLog, "takeover block: no gamedata l4d_tank_pass_fix.txt, using the 0.5 input guard");
+		return;
+	}
+	g_iWinnerOffset = gd.GetOffset("Director::m_iTankLotteryWinner");
+	DynamicDetour d = DynamicDetour.FromConf(gd, "CTerrorPlayer::PlayerZombieAbortControl");
+	delete gd;
+	if (d == null || g_iWinnerOffset <= 0 || !d.Enable(Hook_Pre, Detour_AbortControl))
+	{
+		LogToFileEx(g_sLog, "takeover block: detour or offset unavailable, using the 0.5 input guard");
+		return;
+	}
+	g_bDetour = true;
+	LogToFileEx(g_sLog, "takeover block: PlayerZombieAbortControl detour on (winner offset %d)", g_iWinnerOffset);
+}
+
+int LotteryWinner()
+{
+	Address dir = L4D_GetPointer(POINTER_DIRECTOR);
+	if (dir == Address_Null || g_iWinnerOffset <= 0) return -1;
+	return LoadFromAddress(dir + view_as<Address>(g_iWinnerOffset), NumberType_Int32);
+}
+
+MRESReturn Detour_AbortControl(int client)
+{
+	if (client < 1 || client > MaxClients || !IsClientInGame(client) || GetClientTeam(client) != 3)
+		return MRES_Ignored;	// Valve returns at once for anyone not infected
+	int winner = LotteryWinner();
+	if (winner <= 0 || winner != GetClientUserId(client))
+		return MRES_Ignored;	// Valve's comparison fails: ghost warp / cull branch, untouched
+	bool block = g_cvNoTakeover.BoolValue;
+	int tank = LiveTankBot();
+	// E is edge-triggered; z_abort can be spammed: at most one line per client per 0.5 s
+	float now = GetGameTime();
+	if (now - g_fLastTakeoverLog[client] >= 0.5)
+	{
+		g_fLastTakeoverLog[client] = now;
+		char who[MAX_NAME_LENGTH] = "?", what[64] = "nothing to take";
+		if (winner <= MaxClients && IsClientInGame(winner)) GetClientName(winner, who, sizeof(who));
+		if (tank > 0) Format(what, sizeof(what), "would have taken tank bot #%d", tank);
+		LogToFileEx(g_sLog, "takeover %s: \"%N\" userid=%d = lottery winner index %d \"%s\", %s, t=%.2f (%.2f s after the offer)",
+			block ? "blocked" : "allowed (log only)", client, GetClientUserId(client), winner, who, what, now, now - g_fOfferAt);
+	}
+	return block ? MRES_Supercede : MRES_Ignored;
 }
 
 public void Event_RoundStart(Event event, const char[] name, bool dontBroadcast)
 {
 	g_fLastHumanOffer = -1000.0;
+	g_fOfferUntil = -1000.0;
+}
+
+public void OnClientDisconnect(int client)
+{
+	g_fLastTakeoverLog[client] = 0.0;
+	g_bUseHeld[client] = g_bUseDown[client] = false;
+	g_iLoggedKey[client][0] = g_iLoggedKey[client][1] = 0;
 }
 
 public void OnMapStart()
 {
 	g_fLastHumanOffer = -1000.0;
+	g_fOfferAt = g_fOfferUntil = -1000.0;
 	for (int i = 1; i <= MaxClients; i++)
 	{
+		g_bUseHeld[i] = g_bUseDown[i] = false;
 		g_fClearSpotAt[i] = -1000.0;
 		g_iStuckTicks[i] = 0;
 	}
@@ -208,6 +331,124 @@ public Action L4D_OnTryOfferingTankBot(int tank_index, bool &enterStasis)
 
 	g_fLastHumanOffer = now;
 	return Plugin_Continue;
+}
+
+// ---- 0.5: tank lottery steal guard (see the header) ----
+
+public void L4D_OnTryOfferingTankBot_Post(int tank_index, bool enterStasis)
+{
+	if (tank_index < 1 || tank_index > MaxClients || !IsClientInGame(tank_index) || !IsFakeClient(tank_index))
+		return;	// a human (frustrated) tank: the takeover only ever takes a bot
+	float entry = g_cvLotteryEntry != null ? g_cvLotteryEntry.FloatValue : 0.1;
+	float selection = g_cvLottery != null ? g_cvLottery.FloatValue : 3.0;
+	g_fOfferAt = GetGameTime();
+	g_fOfferUntil = g_fOfferAt + entry + selection + 1.0;
+	g_iOfferSerial++;
+}
+
+int PendingWinner()
+{
+	static bool s_bChecked, s_bHave;
+	int res = GetPlayerResourceEntity();
+	if (res == -1) return -1;
+	if (!s_bChecked)
+	{
+		s_bChecked = true;
+		s_bHave = HasEntProp(res, Prop_Send, "m_pendingTankPlayerIndex");
+		if (!s_bHave) LogToFileEx(g_sLog, "steal guard: terror_player_manager has no m_pendingTankPlayerIndex, using the offer window only");
+	}
+	return s_bHave ? GetEntProp(res, Prop_Send, "m_pendingTankPlayerIndex") : -1;
+}
+
+// What PlayerZombieAbortControl's PlayerCollector(infected, alive, bots, tank) finds: a live tank bot that is
+// not a ghost. The tank on offer is in stasis and a ghost (m_isGhost 1) for the whole lottery, so it is not
+// collected; it is once the draw releases it to the AI, or when another tank is already out as an AI.
+int LiveTankBot()
+{
+	for (int i = 1; i <= MaxClients; i++)
+	{
+		if (IsClientInGame(i) && IsFakeClient(i) && GetClientTeam(i) == 3 && IsPlayerAlive(i)
+			&& GetEntProp(i, Prop_Send, "m_zombieClass") == 5 && !GetEntProp(i, Prop_Send, "m_isGhost"))
+			return i;
+	}
+	return 0;
+}
+
+/**
+ * Would this infected player's PlayerZombieAbortControl take the tank bot right now? Returns the winner's
+ * client index it collides with (0 = no), and why in reason.
+ */
+int StealTarget(int client, char[] reason, int len)
+{
+	if (g_bDetour) return 0;	// 0.6: the detour skips the takeover itself
+	if (LiveTankBot() == 0) return 0;
+	int uid = GetClientUserId(client);
+	int pending = PendingWinner();
+	bool inWindow = GetGameTime() < g_fOfferUntil;
+	if (pending > 0)
+	{
+		if (uid != pending) return 0;
+		strcopy(reason, len, inWindow ? "lottery winner" : "stale winner");
+		return pending;
+	}
+	// the networked copy may still read 0 right after the draw: anyone who could collide with an entrant
+	if (!inWindow || uid > MaxClients) return 0;
+	if (!IsClientInGame(uid) || GetClientTeam(uid) != 3) return 0;
+	if (IsPlayerAlive(uid) && GetEntProp(uid, Prop_Send, "m_zombieClass") == 5) return 0;	// a live tank cannot win
+	strcopy(reason, len, pending == 0 ? "possible winner, draw not networked yet" : "possible winner");
+	return uid;
+}
+
+void LogSteal(int client, int kind, int target, const char[] reason, bool block)
+{
+	// once per client and kind per offer window, and once more for a stale winner after that window
+	int key = g_iOfferSerial * 2 + (GetGameTime() < g_fOfferUntil ? 0 : 1) + 1;
+	if (g_iLoggedKey[client][kind] == key) return;
+	g_iLoggedKey[client][kind] = key;
+	char who[MAX_NAME_LENGTH] = "?";
+	if (target > 0 && target <= MaxClients && IsClientInGame(target)) GetClientName(target, who, sizeof(who));
+	LogToFileEx(g_sLog, "steal guard: %s %s from \"%N\" userid=%d%s = %s index %d \"%s\" t=%.2f (%.2f s after the offer)",
+		block ? "BLOCKED" : "would block (log only)", kind == 0 ? "USE" : "z_abort", client, GetClientUserId(client),
+		IsFakeClient(client) ? " (bot)" : "", reason, target, who, GetGameTime(), GetGameTime() - g_fOfferAt);
+}
+
+public Action OnPlayerRunCmd(int client, int &buttons, int &impulse, float vel[3], float angles[3])
+{
+	if (!(buttons & IN_USE))
+	{
+		g_bUseHeld[client] = g_bUseDown[client] = false;
+		return Plugin_Continue;
+	}
+	if (g_bUseHeld[client])	// still holding a press we dropped: no fresh press when the guard lets go
+	{
+		buttons &= ~IN_USE;
+		return Plugin_Changed;
+	}
+	if (g_bUseDown[client] || GetClientTeam(client) != 3)
+		return Plugin_Continue;	// only a new press reaches PlayerZombieAbortControl (PlayerUse: m_afButtonPressed)
+	g_bUseDown[client] = true;
+	char reason[48];
+	int target = StealTarget(client, reason, sizeof(reason));
+	if (target == 0) return Plugin_Continue;
+	bool block = g_cvStealGuard.BoolValue;
+	LogSteal(client, 0, target, reason, block);
+	if (!block) return Plugin_Continue;
+	buttons &= ~IN_USE;
+	g_bUseHeld[client] = true;
+	g_bUseDown[client] = false;
+	return Plugin_Changed;
+}
+
+public Action Cmd_ZAbort(int client, const char[] command, int argc)
+{
+	if (client < 1 || client > MaxClients || !IsClientInGame(client) || GetClientTeam(client) != 3)
+		return Plugin_Continue;
+	char reason[48];
+	int target = StealTarget(client, reason, sizeof(reason));
+	if (target == 0) return Plugin_Continue;
+	bool block = g_cvStealGuard.BoolValue;
+	LogSteal(client, 1, target, reason, block);
+	return block ? Plugin_Handled : Plugin_Continue;
 }
 
 public void L4D_OnReplaceTank(int tank, int newtank)

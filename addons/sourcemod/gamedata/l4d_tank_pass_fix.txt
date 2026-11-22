@@ -1,0 +1,37 @@
+"Games"
+{
+	"left4dead"
+	{
+		"Functions"
+		{
+			// CTerrorPlayer::PlayerZombieAbortControl (vtable slot 552): an infected player's E (PlayerUse) or
+			// z_abort. l4d_tank_pass_fix 0.6 skips its tank takeover branch. Symbol present in Valve's server.so
+			// (md5 9ad66748, 0x774abc) and in the l4d-source rebuild.
+			"CTerrorPlayer::PlayerZombieAbortControl"
+			{
+				"signature"	"CTerrorPlayer::PlayerZombieAbortControl"
+				"callconv"	"thiscall"
+				"return"	"void"
+				"this"		"entity"
+			}
+		}
+		"Signatures"
+		{
+			"CTerrorPlayer::PlayerZombieAbortControl"
+			{
+				"library"	"server"
+				"linux"		"@_ZN13CTerrorPlayer24PlayerZombieAbortControlEv"
+			}
+		}
+		"Offsets"
+		{
+			// Director::m_iTankLotteryWinner, the lottery winner's CLIENT INDEX (Director::CreateTanks writes it,
+			// CTerrorPlayerResource copies it to m_pendingTankPlayerIndex). 0x330 in Valve's server.so and in the
+			// rebuild (static_assert in director_asserts.inc).
+			"Director::m_iTankLotteryWinner"
+			{
+				"linux"		"816"
+			}
+		}
+	}
+}
