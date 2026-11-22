@@ -5,7 +5,7 @@
 #include <sdktools>
 #include <left4dhooks>
 
-#define PLUGIN_VERSION "1.3"
+#define PLUGIN_VERSION "1.4"
 
 #define TEAM_SURVIVOR		2
 #define TEAM_INFECTED		3
@@ -53,7 +53,7 @@ bool g_bDoorLocked;		// true while we are holding the door shut
 bool g_bGaveUp;			// force open time elapsed, stay unlocked for the rest of the round
 int g_iRoundSeconds;
 float g_fLastUse[MAXPLAYERS + 1];
-int g_iRoundStart, g_iPlayerSpawn;
+int g_iRoundStart;
 Handle g_hCheckTimer;
 float g_fTankGraceUntil;	// game time until which a vanished tank still counts as alive
 float g_fTankPassUntil;		// game time until which a tank pass is in progress
@@ -223,20 +223,24 @@ void UnHookEvents()
 // Round lifecycle
 // ---------------------------------------------------------------------------
 
+// 1.4: every round_start starts the check. 1.3 waited for a player_spawn after round_start,
+// but ResetRound here zeroed g_iPlayerSpawn, so a round whose players all spawned before
+// round_start (the second half of a versus map: survivors respawn first) only started
+// checking at the next player_spawn. With no infected players there is none (an AI tank
+// does not fire one), so the door was never held in that round (owner, 2026-11-22).
+// UpdateDoor already copes with a door that is not there yet.
 public void Event_RoundStart(Event event, const char[] name, bool dontBroadcast)
 {
 	ResetRound();
-
-	if( g_iPlayerSpawn == 1 && g_iRoundStart == 0 )
-		StartChecking();
 	g_iRoundStart = 1;
+	StartChecking();
 }
 
+// Kept as a safety net: a round_start that came before the plugin hooked it.
 public void Event_PlayerSpawn(Event event, const char[] name, bool dontBroadcast)
 {
-	if( g_iPlayerSpawn == 0 && g_iRoundStart == 1 )
+	if( g_hCheckTimer == null && g_bCvarEnable && g_iRoundStart == 1 )
 		StartChecking();
-	g_iPlayerSpawn = 1;
 }
 
 public void Event_RoundEnd(Event event, const char[] name, bool dontBroadcast)
@@ -323,7 +327,6 @@ void ResetRound()
 	g_fTankPassUntil = 0.0;
 	if( g_aWitchDone != null ) g_aWitchDone.Clear();
 	g_iRoundStart = 0;
-	g_iPlayerSpawn = 0;
 
 	for( int i = 0; i <= MaxClients; i++ )
 		g_fLastUse[i] = 0.0;
