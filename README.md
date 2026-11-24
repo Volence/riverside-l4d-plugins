@@ -22,7 +22,7 @@ Each plugin ships as source (`addons/sourcemod/scripting`) and compiled
 | `l4d_wallkick_reset` | 1.1 | Linux (checks the CLunge layout and refuses to load on any other) | A hunter that pinned someone, or scratched and bumped a survivor, can wall kick again after landing. Stock L4D1 keeps its "touched a player" flag until the next pounce from the ground, so a plain jump at a wall cannot be kicked off. See below. |
 | `l4d_smg_common_bonus` | 1.0 | sdkhooks | Uzi bullets do extra damage to common infected only (`l4d_smg_common_bonus`, default 1.25). Special infected, tanks and witches take stock Uzi damage. A buff for clearing horde that leaves the SI fights alone. See below. |
 | `l4d_last_life_fix` | 1.0.1 | sdkhooks | A survivor marked to die (revived, or living on 1 health plus temp health) who still has incaps left is incapped, not killed outright, when a hit lands on the one tick where his temp health is a whole number. Fixes a hole in the game's own damage code. See below. |
-| `l4d_baseline_keep` | 1.1 | Linux, engine.so md5 `9ee78e2fd274e0639e3aae704f2d7b1f` (checks every byte and refuses to patch on any other); gamedata `l4d_baseline_keep.txt` | Fixes a stock engine bug that can leave special infected invisible to one player after that player lags for about a second. See below. |
+| `l4d_baseline_keep` | 1.2 | Linux, engine.so md5 `9ee78e2fd274e0639e3aae704f2d7b1f` or `c67a72dc8eea21bc370272501ccae73a` (Valve's 2026-11-24 update, build 26742533); checks every byte and refuses to patch on any other; gamedata `l4d_baseline_keep.txt` | Fixes a stock engine bug that can leave special infected invisible to one player after that player lags for about a second. See below. |
 | `l4d_tank_rules` | 1.3.1 | gamedata `l4d_tank_rules.txt` (Linux + Windows) | While a tank is alive: survivor distance points are frozen, and primary weapon swaps can be locked, limited to one per tank, or made to cost a full reload. See below. |
 | `l4d_ledge_fix` | 1.3 | left4dhooks, gamedata `l4d_ledge_fix.txt` | Blocks ledge hangs over drops that could not hurt (a survivor hanging off a rock a few units above the floor). See below. |
 | `l4d_fling_fall_fix` | 1.3 | | Stops survivors dying to "fell too far" from short drops after a tank punch: fall damage is taken from the speed gravity could give. See below. |
@@ -979,7 +979,12 @@ live infected and does not draw it. The player can clear it with `record x; stop
 Every patched byte, every jump target and the code the new jumps run through is compared with the
 original first. If anything differs, nothing is written and `sm_baselinekeep_status` says why. The
 original bytes come back on `l4d_baseline_keep_enable 0` and on unload. Linux only, and only the
-engine.so with the md5 above (the current Steam L4D1 dedicated server).
+engine.so builds with the md5s above.
+
+1.2 also accepts the engine.so from Valve's 2026-11-24 update (build 26742533). The two functions, the three
+sites and their offsets are the same in that build; only call targets and string addresses inside the
+compared code moved, so 1.1 refuses to load there. 1.2 was boot-tested at 128 tick on both engine builds
+(patches all three sites, restores them on unload); it has not yet run with real clients on the new one.
 
 Tested at 128 tick with two real clients. On the bench (a ghost seen, then a 4 s client freeze):
 stock 8/8 invisible, patched 0/20, controls 0/8. A 6 s server-to-client packet drop: 1.0 (sites 1

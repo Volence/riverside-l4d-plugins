@@ -3,7 +3,7 @@
 
 #include <sourcemod>
 
-#define PLUGIN_VERSION "1.1"
+#define PLUGIN_VERSION "1.2"
 #define GAMEDATA "l4d_baseline_keep"
 
 // Fixes a stock L4D1 engine bug that leaves special infected invisible to one survivor.
@@ -65,6 +65,11 @@ static const char g_sCtxSnapJe[] = "0F8465040000";
 static const char g_sCtxSnapRest[] = "FF501C8B4C2428894C24108944240C8D83C4E7F6FF89442408C7442404800000008D44246C89442428890424E8C90419008B86F800000085C07412890424E81E6D1000C786F8000000000000008B06893424FF9000010000C744240800080000C7442404000000008B8338FBFFFF8B00890424E8096F1000898600010000";
 static const char g_sCtxSnapBack[] = "E9E7FAFFFF";
 static const char g_sCtxAckJe[] = "0F84EDFEFFFF";
+// Valve build 26742533 (2026-11-24, engine.so md5 of sha256 44ba797f...): the same two functions at the same
+// addresses, same sites and offsets; only call rel32s (+0x70, callees moved) and GOT-relative .rodata leas (+0x80,
+// .rodata grew) inside the context differ. Either build's context is accepted.
+static const char g_sCtxSnapRestB26742533[] = "FF501C8B4C2428894C24108944240C8D8344E8F6FF89442408C7442404800000008D44246C89442428890424E8390519008B86F800000085C07412890424E88E6D1000C786F8000000000000008B06893424FF9000010000C744240800080000C7442404000000008B8338FBFFFF8B00890424E8796F1000898600010000";
+static const char g_sCtxAckTailB26742533[] = "8B86F800000085C07412890424E8FB831000C786F8000000000000008B06893424FF9000010000C744240800080000C7442404000000008B8338FBFFFF8B00890424E8E68510008986000100008B06893424FF501C8D931DE4F6FF89542408894424048D8388E7F6FF890424E8C444F8FFB80100000083C4105B5E5FC3";
 static const char g_sCtxAckTail[] = "8B86F800000085C07412890424E88B831000C786F8000000000000008B06893424FF9000010000C744240800080000C7442404000000008B8338FBFFFF8B00890424E8768510008986000100008B06893424FF501C8D939DE3F6FF89542408894424048D8308E7F6FF890424E8C444F8FFB80100000083C4105B5E5FC3";
 
 int g_iOrig[SITES][16];
@@ -137,7 +142,7 @@ public void OnPluginStart()
 	if( !CheckLayout(why, sizeof(why)) )
 	{
 		g_bBroken = true;
-		SetFailState("Engine code differs from the expected build (%s); not patching. Check engine.so md5 (expected 9ee78e2fd274e0639e3aae704f2d7b1f).", why);
+		SetFailState("Engine code differs from the expected build (%s); not patching. Check engine.so md5 (expected 9ee78e2fd274e0639e3aae704f2d7b1f, or Valve build 26742533).", why);
 	}
 
 	// A previous copy left its patch in place (should not happen: OnPluginEnd restores). Own it.
@@ -234,7 +239,8 @@ bool CheckLayout(char[] why, int maxlen)
 	// the rest of the stock block from the end of site 1 up to site 2 (the -1 path runs through it),
 	// which starts with the free target
 	if( g_iOffSite1 + 15 + strlen(g_sCtxSnapRest) / 2 != g_iOffSite2 || g_iOffFree != g_iOffSite1 + 15 + 0x31
-		|| !MatchHex(g_pSnap + view_as<Address>(g_iOffSite1 + 15), g_sCtxSnapRest) )
+		|| !(MatchHex(g_pSnap + view_as<Address>(g_iOffSite1 + 15), g_sCtxSnapRest)
+			|| MatchHex(g_pSnap + view_as<Address>(g_iOffSite1 + 15), g_sCtxSnapRestB26742533)) )
 		{ strcopy(why, maxlen, "SendSnapshot reset block"); return false; }
 	if( !MatchHex(g_pSnap + view_as<Address>(g_iOffSite2 + 0x22), g_sCtxSnapBack) )
 		{ strcopy(why, maxlen, "SendSnapshot jmp back"); return false; }
@@ -243,7 +249,8 @@ bool CheckLayout(char[] why, int maxlen)
 	// target is the stock forced-immediate tail, verified through its ret
 	if( !MatchHex(g_pAck + view_as<Address>(g_iOffAckSite - 6), g_sCtxAckJe) )
 		{ strcopy(why, maxlen, "UpdateAcknowledgedFramecount je before site 3"); return false; }
-	if( !MatchHex(g_pAck + view_as<Address>(g_iOffAckFree), g_sCtxAckTail) )
+	if( !MatchHex(g_pAck + view_as<Address>(g_iOffAckFree), g_sCtxAckTail)
+		&& !MatchHex(g_pAck + view_as<Address>(g_iOffAckFree), g_sCtxAckTailB26742533) )
 		{ strcopy(why, maxlen, "UpdateAcknowledgedFramecount reset tail"); return false; }
 
 	if( AllSitesAre(false) || AllSitesAre(true) ) return true;
