@@ -19,7 +19,7 @@ Each plugin ships as source (`addons/sourcemod/scripting`) and compiled
 | `l4d_tank_burn_cap` | 1.0 | | Caps total fire damage on the tank so a molotov chips it instead of killing it. |
 | `l4d_vote_lock` | 1.0 | | Makes `!load`, `!match`, `!mode`, `!changemap`, `!cm` and `!setscores` admin only. An admin override does nothing on commands registered with `RegConsoleCmd`, so this uses a command listener instead. |
 | `l4d_hunter_phantom_fix` | 0.2 | | Stops a hunter killed mid-pounce from carrying on shredding (sound and claw blood at the pin spot) on clients after it dies. See below. |
-| `l4d_wallkick_reset` | 1.1 | Linux (checks the CLunge layout and refuses to load on any other) | A hunter that pinned someone, or scratched and bumped a survivor, can wall kick again after landing. Stock L4D1 keeps its "touched a player" flag until the next pounce from the ground, so a plain jump at a wall cannot be kicked off. See below. |
+| `l4d_wallkick_reset` | 1.2 | Linux (checks the CLunge layout and refuses to load on any other) | A hunter that pinned someone, or scratched and bumped a survivor, can wall kick again after landing. Stock L4D1 keeps its "touched a player" flag until the next pounce from the ground, so a plain jump at a wall cannot be kicked off. Since 1.2 a hunter also cannot pounce off a survivor's head. See below. |
 | `l4d_smg_common_bonus` | 1.0 | sdkhooks | Uzi bullets do extra damage to common infected only (`l4d_smg_common_bonus`, default 1.25). Special infected, tanks and witches take stock Uzi damage. A buff for clearing horde that leaves the SI fights alone. See below. |
 | `l4d_last_life_fix` | 1.0.1 | sdkhooks | A survivor marked to die (revived, or living on 1 health plus temp health) who still has incaps left is incapped, not killed outright, when a hit lands on the one tick where his temp health is a whole number. Fixes a hole in the game's own damage code. See below. |
 | `l4d_baseline_keep` | 1.2 | Linux, engine.so md5 `9ee78e2fd274e0639e3aae704f2d7b1f` or `c67a72dc8eea21bc370272501ccae73a` (Valve's 2026-11-24 update, build 26742533); checks every byte and refuses to patch on any other; gamedata `l4d_baseline_keep.txt` | Fixes a stock engine bug that can leave special infected invisible to one player after that player lags for about a second. See below. |
@@ -338,8 +338,17 @@ competitive rework) already handles that one.
 Tested with a bot hunter (3 trials per case, the full Rotoblin plugin set, versus): after touching a
 survivor, 0 of 3 wall kicks without the plugin, 3 of 3 with it; untouched hunters kick 3 of 3 either way.
 
-Cvars: `l4d_wallkick_reset_enable` (1), `l4d_wallkick_reset_debug` (0; 1 tells the hunter in chat when
-the flag was cleared).
+**No pounce off a survivor (1.2).** The game treats a survivor's head as ground, so a hunter that jumps
+onto a survivor, or gets wedged into the top of one, can crouch and pounce straight off him and usually
+pins him at once. Since 1.2 the hunter's pounce press is dropped while it stands on a living survivor or
+its feet are in the top of one. It can pounce again as soon as it is off him, and a hunter with real
+floor under its feet (a car roof or ledge beside a survivor) is never blocked. Tested with a bot hunter
+placed where a player did this in a match (full Rotoblin plugin set, versus): 6 of 6 pounces off the
+survivor without the rule, 0 of 6 with it.
+
+Cvars: `l4d_wallkick_reset_enable` (1), `l4d_wallkick_reset_survivor` (1; 0 turns off only the 1.2 rule),
+`l4d_wallkick_reset_debug` (0; 1 tells the hunter in chat when the flag was cleared or a pounce was
+dropped).
 
 ## Tank rules
 
